@@ -1,6 +1,6 @@
 from enum import Enum
 from typing import Optional, List, Dict, Any, Union, Literal, Callable
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from datetime import datetime
 
 class AgentKind(str, Enum):
@@ -128,11 +128,41 @@ class GetFilesParams(BaseModel):
     workspace_id: int = Field(gt=0, description="Workspace ID must be a positive integer")
 
 class UploadFileParams(BaseModel):
-    workspace_id: int
-    path: str
-    task_ids: Optional[Union[List[int], int, None]] = None
-    skip_summarizer: Optional[bool] = None
-    file: Union[bytes, str]
+    """Parameters for uploading a file to a workspace.
+    
+    Attributes:
+        workspace_id: The ID of the workspace to upload to
+        path: The path/name for the file in the workspace
+        file: The file content as either bytes (for binary files) or str (for text files)
+        task_ids: Optional task ID(s) to associate the file with
+        skip_summarizer: Optional flag to skip content summarization
+    """
+    workspace_id: int = Field(..., gt=0, description="Workspace ID must be a positive integer")
+    path: str = Field(..., min_length=1, description="Path/name for the file in the workspace")
+    file: Union[bytes, str] = Field(..., description="File content as bytes (binary) or str (text)")
+    task_ids: Optional[Union[List[int], int]] = Field(None, description="Task ID(s) to associate the file with")
+    skip_summarizer: Optional[bool] = Field(None, description="Whether to skip content summarization")
+
+    @validator('file')
+    def validate_file(cls, v):
+        """Validate file content is not empty."""
+        if isinstance(v, str) and not v.strip():
+            raise ValueError("File content cannot be empty string")
+        if isinstance(v, bytes) and not v:
+            raise ValueError("File content cannot be empty bytes")
+        return v
+
+    @validator('path')
+    def validate_path(cls, v):
+        """Validate file path is valid."""
+        if not v.strip():
+            raise ValueError("File path cannot be empty")
+        return v.strip()
+
+    class Config:
+        json_encoders = {
+            bytes: lambda v: v.decode('utf-8', errors='ignore')
+        }
 
 class MarkTaskAsErroredParams(BaseModel):
     workspace_id: int
@@ -169,11 +199,40 @@ class CreateTaskParams(BaseModel):
     dependencies: List[int]
 
 class AddLogToTaskParams(BaseModel):
-    workspace_id: int
-    task_id: int
-    severity: Literal['info', 'warning', 'error']
-    type: Literal['text', 'openai-message']
-    body: Union[str, dict]
+    """Parameters for adding a log entry to a task.
+    
+    Attributes:
+        workspace_id: The ID of the workspace containing the task
+        task_id: The ID of the task to add the log to
+        severity: The severity level of the log ('info', 'warning', or 'error')
+        type: The type of log entry ('text' for plain text or 'openai-message' for OpenAI message format)
+        body: The log content - string for 'text' type or dict for 'openai-message' type
+    """
+    workspace_id: int = Field(..., gt=0, description="Workspace ID must be a positive integer")
+    task_id: int = Field(..., gt=0, description="Task ID must be a positive integer")
+    severity: Literal['info', 'warning', 'error'] = Field(..., description="Severity level of the log")
+    type: Literal['text', 'openai-message'] = Field(..., description="Type of log entry")
+    body: Union[str, dict] = Field(..., description="Log content (string for text, dict for openai-message)")
+
+    @validator('body')
+    def validate_body(cls, v, values):
+        """Validate the body matches the specified type."""
+        log_type = values.get('type')
+        if log_type == 'text' and not isinstance(v, str):
+            raise ValueError("Body must be a string for text type logs")
+        elif log_type == 'openai-message' and not isinstance(v, dict):
+            raise ValueError("Body must be a dictionary for openai-message type logs")
+        
+        if log_type == 'openai-message' and isinstance(v, dict):
+            required_fields = ['role', 'content']
+            if not all(field in v for field in required_fields):
+                raise ValueError("OpenAI message must contain 'role' and 'content' fields")
+            
+            valid_roles = ['system', 'user', 'assistant', 'tool']
+            if v.get('role') not in valid_roles:
+                raise ValueError(f"Invalid role. Must be one of: {', '.join(valid_roles)}")
+        
+        return v
 
 class RequestHumanAssistanceParams(BaseModel):
     workspace_id: int
@@ -183,9 +242,26 @@ class RequestHumanAssistanceParams(BaseModel):
     agent_dump: Optional[dict] = None
 
 class UpdateTaskStatusParams(BaseModel):
-    workspace_id: int
-    task_id: int
-    status: TaskStatus
+    """Parameters for updating a task's status.
+    
+    Attributes:
+        workspace_id: The ID of the workspace containing the task
+        task_id: The ID of the task to update
+        status: The new status to set for the task
+    """
+    workspace_id: int = Field(..., gt=0, description="Workspace ID must be a positive integer")
+    task_id: int = Field(..., gt=0, description="Task ID must be a positive integer")
+    status: TaskStatus = Field(..., description="New status for the task")
+
+    @validator('status')
+    def validate_status(cls, v):
+        """Validate the task status is a valid enum value."""
+        if not isinstance(v, TaskStatus):
+            try:
+                return TaskStatus(v)
+            except ValueError:
+                raise ValueError(f"Invalid status. Must be one of: {', '.join(TaskStatus.__members__.values())}")
+        return v
 
 class ProxyConfiguration(BaseModel):
     endpoint: str
