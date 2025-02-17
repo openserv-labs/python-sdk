@@ -366,6 +366,7 @@ class Agent:
         except Exception as error:
             logger.error(f"Task {action.task.id} execution failed with error: {str(error)}")
             logger.error(f"Stack trace: {traceback.format_exc()}")
+
             try:
                 await self.mark_task_as_errored(
                     workspace_id=action.workspace.id,
@@ -374,6 +375,7 @@ class Agent:
                 )
             except Exception as mark_error:
                 logger.error(f"Failed to mark task as errored: {str(mark_error)}")
+            
             self.handle_error(error, {"context": "task_execution"})
             raise
 
