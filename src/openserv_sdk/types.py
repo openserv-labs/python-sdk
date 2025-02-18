@@ -2,6 +2,7 @@ from enum import Enum
 from typing import Optional, List, Dict, Any, Union, Literal, Callable
 from pydantic import BaseModel, Field, validator
 from datetime import datetime
+from dataclasses import dataclass
 
 class AgentKind(str, Enum):
     EXTERNAL = 'external'
@@ -127,42 +128,19 @@ class AgentOptions(BaseModel):
 class GetFilesParams(BaseModel):
     workspace_id: int = Field(gt=0, description="Workspace ID must be a positive integer")
 
-class UploadFileParams(BaseModel):
-    """Parameters for uploading a file to a workspace.
-    
-    Attributes:
-        workspace_id: The ID of the workspace to upload to
-        path: The path/name for the file in the workspace
-        file: The file content as either bytes (for binary files) or str (for text files)
-        task_ids: Optional task ID(s) to associate the file with
-        skip_summarizer: Optional flag to skip content summarization
-    """
-    workspace_id: int = Field(..., gt=0, description="Workspace ID must be a positive integer")
-    path: str = Field(..., min_length=1, description="Path/name for the file in the workspace")
-    file: Union[bytes, str] = Field(..., description="File content as bytes (binary) or str (text)")
-    task_ids: Optional[Union[List[int], int]] = Field(None, description="Task ID(s) to associate the file with")
-    skip_summarizer: Optional[bool] = Field(None, description="Whether to skip content summarization")
+@dataclass
+class ListFilesParams:
+    """Parameters for listing files in a workspace."""
+    workspace_id: int
 
-    @validator('file')
-    def validate_file(cls, v):
-        """Validate file content is not empty."""
-        if isinstance(v, str) and not v.strip():
-            raise ValueError("File content cannot be empty string")
-        if isinstance(v, bytes) and not v:
-            raise ValueError("File content cannot be empty bytes")
-        return v
-
-    @validator('path')
-    def validate_path(cls, v):
-        """Validate file path is valid."""
-        if not v.strip():
-            raise ValueError("File path cannot be empty")
-        return v.strip()
-
-    class Config:
-        json_encoders = {
-            bytes: lambda v: v.decode('utf-8', errors='ignore')
-        }
+@dataclass
+class UploadFileParams:
+    """Parameters for uploading a file to a workspace."""
+    workspace_id: int
+    path: str
+    file: Union[str, bytes]
+    task_ids: Optional[Union[int, List[int]]] = None
+    skip_summarizer: Optional[bool] = None
 
 class MarkTaskAsErroredParams(BaseModel):
     workspace_id: int
