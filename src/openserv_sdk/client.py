@@ -198,8 +198,8 @@ class RuntimeClient(BaseClient):
         """Execute a task."""
         url = f"{self.config.runtime_url}/runtime/execute"
         payload = {
-            'workspace_id': workspace_id,
-            'task_id': task_id,
+            'workspaceId': workspace_id,
+            'taskId': task_id,
             'tools': tools,
             'messages': messages,
             'action': action
