@@ -195,7 +195,11 @@ class Agent:
                 completion = await self._openai_client.chat.completions.create(
                     messages=current_messages,
                     model="gpt-4",
-                    tools=self.openai_tools if self._tools else None
+                    tools=self.convert_to_openai_tools([{
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.schema.model_json_schema()
+                    } for tool in self._tools]) if self._tools else None
                 )
 
                 if not completion.choices:
@@ -356,7 +360,7 @@ class Agent:
 
             # Execute the task and let the runtime handle the response
             logger.info(f"Executing task {action.task.id}")
-            tools_json = [self._convert_tool_to_json_schema(t) for t in self._tools]
+            tools_json = [Agent._convert_tool_to_json_schema(t) for t in self._tools]
             action_data = {
                 'type': action.type,
                 'me': {
@@ -489,7 +493,7 @@ class Agent:
         try:
             # Get the chat response
             response = await self._runtime_client.handle_chat(
-                tools=[self._convert_tool_to_json_schema(t) for t in self._tools],
+                tools=[Agent._convert_tool_to_json_schema(t) for t in self._tools],
                 messages=messages,
                 action=action.model_dump()
             )
@@ -505,6 +509,7 @@ class Agent:
             logger.error("Chat response failed: %s", str(error), exc_info=True)
             # Don't re-raise the error to match TypeScript behavior
 
+    @staticmethod
     def _convert_tool_to_json_schema(tool: Capability[BaseModel]) -> Dict[str, Any]:
         """Convert a tool to JSON schema format."""
         schema = tool.schema.model_json_schema()
