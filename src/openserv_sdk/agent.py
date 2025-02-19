@@ -433,10 +433,17 @@ class Agent:
     @staticmethod
     def _convert_tool_to_json_schema(tool: Capability[BaseModel]) -> Dict[str, Any]:
         """Convert a tool to JSON schema format."""
+        schema = tool.schema.model_json_schema()
+        # Remove title from properties if present
+        if "properties" in schema:
+            for prop in schema["properties"].values():
+                if isinstance(prop, dict):
+                    prop.pop("title", None)
+        
         return {
             'name': tool.name,
             'description': tool.description,
-            'schema': tool.schema.model_json_schema()
+            'parameters': schema
         }
 
     async def get_files(self, params: GetFilesParams) -> List[UploadedFile]:
