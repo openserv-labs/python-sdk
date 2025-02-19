@@ -330,6 +330,7 @@ class Agent:
         """Handle a task execution request."""
         logger.info(f"Processing task: {action.task}")
         logger.info(f"Task ID: {action.task.id}")
+        logger.info(f"Workspace ID: {action.workspace.id}")
 
         messages = [
             {'role': 'system', 'content': self.config.system_prompt}
@@ -357,6 +358,10 @@ class Agent:
             logger.info(f"Executing task {action.task.id}")
             tools_json = [self._convert_tool_to_json_schema(t) for t in self._tools]
             action_data = action.model_dump()
+
+            logger.info(f"Tools JSON: {json.dumps(tools_json, indent=2)}")
+            logger.info(f"Messages: {json.dumps(messages, indent=2)}")
+            logger.info(f"Action data: {json.dumps(action_data, indent=2)}")
 
             try:
                 await self._runtime_client.execute_task(
