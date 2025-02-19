@@ -360,7 +360,9 @@ class Agent:
 
             # Execute the task and let the runtime handle the response
             logger.info(f"Executing task {action.task.id}")
+            
             tools_json = [Agent._convert_tool_to_json_schema(t) for t in self._tools]
+
             action_data = {
                 'type': action.type,
                 'me': {
@@ -509,7 +511,6 @@ class Agent:
             logger.error("Chat response failed: %s", str(error), exc_info=True)
             # Don't re-raise the error to match TypeScript behavior
 
-    @staticmethod
     def _convert_tool_to_json_schema(tool: Capability[BaseModel]) -> Dict[str, Any]:
         """Convert a tool to JSON schema format."""
         schema = tool.schema.model_json_schema()
@@ -566,7 +567,9 @@ class Agent:
 
     async def get_file_content(self, workspace_id: int, file_id: str) -> bytes:
         """Get file content as bytes."""
+
         response = await self.api_client.get(f"/workspaces/{workspace_id}/file/{file_id}/content")
+
         if isinstance(response, dict) and "data" in response:
             return response["data"]
         return response
