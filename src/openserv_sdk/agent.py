@@ -694,7 +694,7 @@ class Agent:
     async def update_task_status(self, params: UpdateTaskStatusParams) -> Dict[str, Any]:
         """Update a task's status."""
         try:
-            response = await self._api_client.put(
+            response = await self._api_client.post(
                 f"/workspaces/{params.workspace_id}/tasks/{params.task_id}/status",
                 {"status": params.status.value if isinstance(params.status, TaskStatus) else params.status}
             )
