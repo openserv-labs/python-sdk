@@ -207,6 +207,8 @@ class RuntimeClient(BaseClient):
         logger.info(f"Executing task with payload: {json.dumps(payload, indent=2)}")
         try:
             response = await self._request('POST', url, json_data=payload)
+            if isinstance(response, bytes):
+                return {"status": "success"}
             logger.info(f"Task execution response: {json.dumps(response, indent=2) if response else 'None'}")
             return response or {}
         except Exception as e:
