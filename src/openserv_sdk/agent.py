@@ -564,36 +564,36 @@ class Agent:
         )
         return response["data"]
 
-    async def get_file_content(self, workspaceId: int, fileId: str) -> bytes:
+    async def get_file_content(self, workspace_id: int, file_id: str) -> bytes:
         """Get file content as bytes."""
-        response = await self.api_client.get(f"/workspaces/{workspaceId}/file/{fileId}/content")
+        response = await self.api_client.get(f"/workspaces/{workspace_id}/file/{file_id}/content")
         if isinstance(response, dict) and "data" in response:
             return response["data"]
         return response
 
-    async def save_output_file(self, workspaceId: int, fileName: str, content: Union[str, bytes], taskId: Optional[int] = None) -> str:
+    async def save_output_file(self, workspace_id: int, file_name: str, content: Union[str, bytes], task_id: Optional[int] = None) -> str:
         """Save an output file and return its access URL."""
         params = UploadFileParams(
-            workspaceId=workspaceId,
-            path=fileName,
+            workspace_id=workspace_id,
+            path=file_name,
             file=content,
-            taskIds=[taskId] if taskId else None
+            task_ids=[task_id] if task_id else None
         )
-        result = self.upload_file(params)
-        return result.url
+        result = await self.upload_file(params)
+        return result["url"]
 
-    async def read_file_content(self, workspaceId: int, fileId: str, encoding: Optional[str] = None) -> Union[str, bytes]:
+    async def read_file_content(self, workspace_id: int, file_id: str, encoding: Optional[str] = None) -> Union[str, bytes]:
         """Read content from an uploaded file.
         
         Args:
-            workspaceId: ID of the workspace containing the file
-            fileId: ID of the file to read
+            workspace_id: ID of the workspace containing the file
+            file_id: ID of the file to read
             encoding: Optional encoding to use for text files (e.g., 'utf-8')
         
         Returns:
             str if encoding is provided, bytes otherwise
         """
-        content = self.get_file_content(workspaceId=workspaceId, fileId=fileId)
+        content = await self.get_file_content(workspace_id=workspace_id, file_id=file_id)
         if encoding:
             return content.decode(encoding)
         return content
