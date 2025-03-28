@@ -97,7 +97,7 @@ python marketing_agent.py
 
 3. Test the agent with the following prompt:
 ```
-Create a social media post for Twitter about the launch of our new AI-powered productivity tool. Then analyze the engagement metrics with 1000 likes, 200 shares, 50 comments, and 5000 impressions.
+Create a social media post for Twitter about the launch of our new AI-powered productivity tool. Then analyze the engagement metrics with 10 likes, 20 shares, 5 comments, and 100 impressions.
 ```
 
 ### Custom Agent Example
