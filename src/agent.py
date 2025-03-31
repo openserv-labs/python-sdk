@@ -8,12 +8,13 @@ import openai
 import asyncio
 import signal
 from pydantic import BaseModel
+import json
 
 # Configure logging to show INFO and above
 logging.basicConfig(level=logging.INFO)
 
 from .config import Config
-from .client import OpenServClient, RuntimeClient
+from .client import OpenServClient, RuntimeClient, DateTimeEncoder
 from .server import AgentServer
 from .capability import Capability
 from .exceptions import ConfigurationError, RuntimeError
@@ -255,6 +256,16 @@ class Agent:
             })
 
         try:
+            json_data = {
+                'workspace_id': action.workspace.id,
+                'task_id': action.task.id,
+                'tools': [self._convert_tool_to_json_schema(t) for t in self.tools],
+                'messages': messages,
+                'action': action.model_dump()
+            }
+            json_str = json.dumps(json_data, cls=DateTimeEncoder)
+            logger.info(f"Request size: {len(json_str)} bytes")
+
             await self.runtime_client.execute_task(
                 workspace_id=action.workspace.id,
                 task_id=action.task.id,
