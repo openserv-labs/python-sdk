@@ -198,6 +198,7 @@ class Agent:
 
     async def handle_tool_route(self, tool_name: str, body: Dict[str, Any]) -> Dict[str, Any]:
         """Handle execution of a specific tool/capability."""
+        print(f"Tool route handler received messages: {body}")
         try:
             tool = next((t for t in self.tools if t.name == tool_name), None)
             if not tool:
