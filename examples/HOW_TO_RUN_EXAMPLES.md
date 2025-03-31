@@ -116,14 +116,9 @@ Hello, can you help me with a task?
 ### Twitter Agent Example
 This example demonstrates an agent specifically designed to interact with Twitter.
 
-1. Navigate to the examples directory:
+1. Navigate to the examples directory and Run the Twitter agent:
 ```bash
-cd examples
-```
-
-2. Run the Twitter agent:
-```bash
-python twitter_agent.py
+python3 examples/twitter_agent.py
 ```
 
 3. Test the agent with the following prompt:
