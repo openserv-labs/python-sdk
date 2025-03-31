@@ -47,20 +47,21 @@ async def create_social_media_post(params: SocialMediaPostParams, messages: List
     messages.append({"role": "user", "content": prompt})
 
     completion = openai_client.chat.completions.create(
-        model="gpt-4",
+        model="gpt-4o",
         messages=messages
     )
 
     return completion.choices[0].message.content
 
 async def analyze_engagement(
-    agent: Agent,
-    params: Dict[str, Any]
+    params: Dict[str, Any],
+    messages: List[Dict[str, str]] = None
 ) -> str:
     """Analyze social media engagement metrics."""
-    args = params.get('args')
-    if not isinstance(args, AnalyzeEngagementParams):
-        args = AnalyzeEngagementParams.model_validate(args)
+    if not isinstance(params, AnalyzeEngagementParams):
+        args = AnalyzeEngagementParams.model_validate(params)
+    else:
+        args = params
 
     completion = openai_client.chat.completions.create(
         model='gpt-4o',
@@ -82,7 +83,7 @@ Provide:
             },
             {
                 'role': 'user',
-                'content': str(args.model_dump())
+                'content': f"Platform: {args.platform}\nMetrics: {args.metrics.model_dump_json()}"
             }
         ]
     )
