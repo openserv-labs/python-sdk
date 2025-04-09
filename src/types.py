@@ -115,6 +115,13 @@ class AgentOptions(BaseModel):
 class GetFilesParams(BaseModel):
     workspace_id: int
 
+class GetSecretsParams(BaseModel):
+    workspace_id: int
+
+class GetSecretValueParams(BaseModel):
+    workspace_id: int
+    secret_id: str
+
 class UploadFileParams(BaseModel):
     workspace_id: int
     path: str
