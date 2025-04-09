@@ -30,11 +30,18 @@ class AgentServer:
             if not self._agent:
                 raise HTTPException(status_code=500, detail="Agent not initialized")
             
-            body = await request.json()
-            logger.debug("Request body: %s", body)
-            
-            await self._agent.handle_root_route(body)
-            return "OK"
+            try:
+                body = await request.json()
+                logger.debug("Request body: %s", body)
+                
+                await self._agent.handle_root_route(body)
+                return "OK"
+            except Exception as e:
+                logger.exception("Error handling root request: %s", str(e))
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Error processing request: {str(e)}"
+                )
             
         @self.app.post("/tools/{tool_name}")
         async def tool(tool_name: str, request: Request):
@@ -42,9 +49,24 @@ class AgentServer:
             if not self._agent:
                 raise HTTPException(status_code=500, detail="Agent not initialized")
                 
-            body = await request.json()
-            result = await self._agent.handle_tool_route(tool_name, body)
-            return result
+            try:
+                body = await request.json()
+                logger.debug("Tool request for %s: %s", tool_name, body)
+                
+                # Ensure body contains necessary parameters
+                if 'args' not in body:
+                    body['args'] = {}
+                if 'messages' not in body:
+                    body['messages'] = []
+                
+                result = await self._agent.handle_tool_route(tool_name, body)
+                return result
+            except Exception as e:
+                logger.exception("Error handling tool request for %s: %s", tool_name, str(e))
+                raise HTTPException(
+                    status_code=500, 
+                    detail=f"Error executing tool {tool_name}: {str(e)}"
+                )
 
     def set_agent(self, agent: Any) -> None:
         """Set the agent instance for request handling."""
