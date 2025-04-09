@@ -34,7 +34,9 @@ from .types import (
     RequestHumanAssistanceParams,
     UpdateTaskStatusParams,
     IntegrationCallRequest,
-    ProxyConfiguration
+    ProxyConfiguration,
+    GetSecretsParams,
+    GetSecretValueParams
 )
 
 logger = logging.getLogger(__name__)
@@ -206,6 +208,7 @@ class Agent:
 
             args = tool.schema.model_validate(body.get('args', {}))
             messages = body.get('messages', [])
+            action = body.get('action', None)
             result = await tool.run(args, messages)
             return {'result': result}
         except Exception as error:
@@ -315,6 +318,16 @@ class Agent:
     async def get_files(self, workspace_id: int) -> Dict[str, Any]:
         """Get files in a workspace."""
         response = await self.api_client.get(f"/workspaces/{workspace_id}/files")
+        return response["data"]
+
+    async def get_secrets(self, params: GetSecretsParams) -> Dict[str, Any]:
+        """Get all secrets for an agent in a workspace."""
+        response = await self.api_client.get(f"/workspaces/{params.workspace_id}/agent-secrets")
+        return response["data"]
+
+    async def get_secret_value(self, params: GetSecretValueParams) -> str:
+        """Get the value of a secret for an agent in a workspace."""
+        response = await self.api_client.get(f"/workspaces/{params.workspace_id}/agent-secrets/{params.secret_id}/value")
         return response["data"]
 
     async def upload_file(self, workspace_id: int, path: str, file: Union[str, bytes], task_ids: Optional[List[int]] = None, skip_summarizer: bool = False) -> Dict[str, Any]:
