@@ -106,8 +106,23 @@ class BaseClient:
             elif 'text/html' in content_type or 'text/plain' in content_type:
                 return {'status': response.text}
             else:
+                # Special handling for empty or unspecified content types
+                if path.endswith('/execute') and response.status_code == 200:
+                    logger.info("Task execution request successful with status 200")
+                    # Return a successful response even if there's no content
+                    return {'success': True, 'status': 'Task execution initiated'}
+                
                 logger.warning(f"Unhandled content type: {content_type}")
-                return None
+                # Try to parse as JSON anyway if there's content
+                if response.content:
+                    try:
+                        json_response = response.json()
+                        logger.info("Successfully parsed response as JSON despite missing content-type")
+                        return json_response
+                    except json.JSONDecodeError:
+                        logger.warning("Could not parse response as JSON")
+                        return {'raw_content': response.text if response.text else 'Empty response'}
+                return {'status': 'No content'}
                 
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 401:
@@ -208,24 +223,36 @@ class RuntimeClient(BaseClient):
         }
         
         # Execute the request
-        response = await self._request(
-            'POST',
-            '/execute',
-            json_data=json_data
-        )
-        
-        # Log detailed response info
-        if response:
-            if isinstance(response, dict):
-                logger.info(f"Task execution response received: {list(response.keys())}")
-                if 'tools' in response:
-                    logger.info(f"Response includes tool info: {response.get('tools')}")
-            else:
-                logger.info(f"Task execution response type: {type(response)}")
-        else:
-            logger.info("No response data received from task execution")
+        try:
+            response = await self._request(
+                'POST',
+                '/execute',
+                json_data=json_data
+            )
             
-        return response
+            # Special handling for task execution responses
+            if response:
+                if isinstance(response, dict):
+                    logger.info(f"Task execution response received: {list(response.keys())}")
+                    if 'success' in response and response['success']:
+                        logger.info(f"Task {task_id} successfully initiated")
+                    if 'tools' in response:
+                        logger.info(f"Response includes tool info: {response.get('tools')}")
+                else:
+                    logger.info(f"Task execution response type: {type(response)}")
+            else:
+                # If no response data, still consider the task successful if no exception was raised
+                logger.info("No detailed response data received but execution request was successful")
+                response = {'success': True, 'status': 'Task execution successfully initiated'}
+            
+            return response
+        except Exception as error:
+            logger.error(f"Task execution error: {str(error)}", exc_info=True)
+            # Return a response indicating failure
+            return {
+                'success': False,
+                'error': str(error)
+            }
     
     async def handle_chat(
         self,
