@@ -296,14 +296,13 @@ class Agent:
                 })
 
         try:
-            # Include single_use parameter to tell the runtime to respond directly without looping through tools
-            # This matches how the TypeScript SDK handles chat
+            # Set direct_response flag to tell the runtime to avoid tool loops
             logger.info("Sending chat to runtime with %d messages", len(messages))
             await self.runtime_client.handle_chat(
                 tools=[self._convert_tool_to_json_schema(t) for t in self.tools],
                 messages=messages,
                 action=action.model_dump(),
-                single_use=True  # Indicate this should be a direct response, not a tool chain
+                direct_response=True  # Add flag to prevent tool call loops
             )
         except Exception as error:
             logger.error("Chat response failed: %s", str(error), exc_info=True)
