@@ -60,6 +60,7 @@ class BaseClient:
         params: Optional[Dict[str, str]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Make an HTTP request and handle common error cases."""
+        logger = logging.getLogger(__name__)
         try:
             # Pre-serialize JSON with our custom encoder
             content = None
@@ -67,6 +68,9 @@ class BaseClient:
             if json_data is not None:
                 content = json.dumps(json_data, cls=DateTimeEncoder).encode('utf-8')
                 headers['Content-Type'] = 'application/json'
+                logger.debug(f"Sending {method} request to {path} with data size: {len(content)} bytes")
+            else:
+                logger.debug(f"Sending {method} request to {path} without data")
 
             response = await self.client.request(
                 method,
@@ -76,19 +80,33 @@ class BaseClient:
                 headers=headers,
             )
             
-            logger.info("Response status: %d", response.status_code)
-            logger.debug("Response headers: %s", response.headers)
-            logger.debug("Response content: %s", response.content)
+            logger.info(f"Response status: {response.status_code}")
+            logger.debug(f"Response headers: {response.headers}")
+            logger.debug(f"Response content size: {len(response.content)} bytes")
+            
+            # Log the actual content for debugging, but limit length
+            if len(response.content) < 1000:
+                logger.debug(f"Response content: {response.content}")
+            else:
+                logger.debug(f"Response content (truncated): {response.content[:1000]}...")
             
             response.raise_for_status()
             
             # Handle different content types
             content_type = response.headers.get('content-type', '')
+            logger.debug(f"Response content type: {content_type}")
+            
             if 'application/json' in content_type:
-                return response.json() if response.content else None
+                if response.content:
+                    json_response = response.json()
+                    if isinstance(json_response, dict):
+                        logger.debug(f"JSON response keys: {list(json_response.keys())}")
+                    return json_response
+                return None
             elif 'text/html' in content_type or 'text/plain' in content_type:
                 return {'status': response.text}
             else:
+                logger.warning(f"Unhandled content type: {content_type}")
                 return None
                 
         except httpx.HTTPStatusError as e:
@@ -104,14 +122,17 @@ class BaseClient:
                 # If response is not JSON, use text content
                 error_details = {'error': e.response.text} if e.response.text else None
                 
+            logger.error(f"HTTP error {e.response.status_code}: {error_details}")
             raise APIError(
                 str(e),
                 status_code=e.response.status_code,
                 response=error_details
             )
         except httpx.RequestError as e:
+            logger.error(f"Request error: {str(e)}")
             raise APIError(f"Request failed: {str(e)}")
         except json.JSONDecodeError as e:
+            logger.error(f"JSON decode error: {str(e)}")
             raise APIError(f"Invalid JSON response: {str(e)}")
 
 class OpenServClient(BaseClient):
@@ -170,17 +191,41 @@ class RuntimeClient(BaseClient):
         action: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Execute a task through the runtime."""
-        return await self._request(
+        logger = logging.getLogger(__name__)
+        
+        # Log detailed info about the request
+        logger.info(f"Executing task {task_id} for workspace {workspace_id}")
+        logger.info(f"Tools provided: {', '.join(t.get('name', 'unknown') for t in tools)}")
+        logger.info(f"Number of messages: {len(messages)}")
+        
+        # Create the request payload
+        json_data = {
+            'workspace_id': workspace_id,
+            'task_id': task_id,
+            'tools': tools,
+            'messages': messages,
+            'action': action
+        }
+        
+        # Execute the request
+        response = await self._request(
             'POST',
             '/execute',
-            json_data={
-                'workspace_id': workspace_id,
-                'task_id': task_id,
-                'tools': tools,
-                'messages': messages,
-                'action': action
-            }
+            json_data=json_data
         )
+        
+        # Log detailed response info
+        if response:
+            if isinstance(response, dict):
+                logger.info(f"Task execution response received: {list(response.keys())}")
+                if 'tools' in response:
+                    logger.info(f"Response includes tool info: {response.get('tools')}")
+            else:
+                logger.info(f"Task execution response type: {type(response)}")
+        else:
+            logger.info("No response data received from task execution")
+            
+        return response
     
     async def handle_chat(
         self,

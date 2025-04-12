@@ -67,6 +67,9 @@ class Agent:
             self.config.openai.api_key = options.openai_api_key
         if options.port:
             self.config.server.port = options.port
+        if options.model:
+            self.config.openai.model = options.model
+            logger.info(f"Using custom OpenAI model: {options.model}")
             
         # Validate configuration
         self.config.validate_api_key()
@@ -76,6 +79,9 @@ class Agent:
         self._openai: Optional[openai.OpenAI] = None
         self.api_client = OpenServClient(self.config.api)
         self.runtime_client = RuntimeClient(self.config.api)
+        
+        # Store error handler if provided
+        self.on_error = options.on_error
         
         # Set up server
         self.server = AgentServer(self.config.server)
@@ -126,6 +132,16 @@ class Agent:
             while iteration_count < max_iterations:
                 logger.debug("Process iteration %d/%d", iteration_count + 1, max_iterations)
                 
+                # Debug the tools being sent to OpenAI
+                if self.tools:
+                    tool_names = [tool.name for tool in self.tools]
+                    logger.info(f"Sending {len(self.tools)} tools to OpenAI: {tool_names}")
+                else:
+                    logger.info("No tools available to send to OpenAI")
+                
+                # Log the model being used
+                logger.info(f"Using OpenAI model: {self.config.openai.model}")
+                
                 completion = await self.openai_client.chat.completions.create(
                     model=self.config.openai.model,
                     messages=current_messages,
@@ -136,12 +152,13 @@ class Agent:
                     raise RuntimeError('No response from OpenAI')
 
                 last_message = completion.choices[0].message
-                logger.debug("Received message from OpenAI: %s", last_message)
+                logger.info(f"Received message from OpenAI: {last_message}")
 
                 if not last_message.tool_calls:
                     logger.info("No tool calls requested, returning completion")
                     return completion.model_dump()
 
+                logger.info(f"OpenAI requested {len(last_message.tool_calls)} tool calls")
                 tool_results = []
                 for tool_call in last_message.tool_calls:
                     if not tool_call.function:
@@ -149,22 +166,23 @@ class Agent:
 
                     name = tool_call.function.name
                     args = tool_call.function.arguments
-                    logger.info("Executing tool '%s' with args: %s", name, args)
+                    logger.info(f"Executing tool '{name}' with args: {args}")
 
                     try:
                         tool = next((t for t in self.tools if t.name == name), None)
                         if not tool:
                             raise RuntimeError(f'Tool "{name}" not found')
-
+                        
+                        logger.info(f"Found tool: {tool.name}, schema: {tool.schema.__name__}")
                         result = await tool.run({"args": args}, current_messages)
-                        logger.debug("Tool '%s' execution result: %s", name, result)
+                        logger.info(f"Tool '{name}' execution result: {result}")
                         tool_results.append({
                             'role': 'tool',
                             'content': str(result),
                             'tool_call_id': tool_call.id
                         })
                     except Exception as error:
-                        logger.error("Tool execution failed: %s", str(error), exc_info=True)
+                        logger.error(f"Tool execution failed: {str(error)}", exc_info=True)
                         tool_results.append({
                             'role': 'tool',
                             'content': str({'error': str(error)}),
@@ -248,6 +266,8 @@ class Agent:
 
     async def do_task(self, action: DoTaskAction) -> None:
         """Handle a task execution request."""
+        logger.info(f"Handling task: {action.task.id} - '{action.task.description}'")
+        
         messages = [
             {'role': 'system', 'content': self.config.system_prompt}
         ]
@@ -257,6 +277,9 @@ class Agent:
                 'role': 'user',
                 'content': action.task.description
             })
+            
+        logger.info(f"Task messages: {messages}")
+        logger.info(f"Available tools: {[tool.name for tool in self.tools]}")
 
         try:
             json_data = {
@@ -268,16 +291,18 @@ class Agent:
             }
             json_str = json.dumps(json_data, cls=DateTimeEncoder)
             logger.info(f"Request size: {len(json_str)} bytes")
-
-            await self.runtime_client.execute_task(
+            
+            logger.info("Sending task execution request to runtime")
+            response = await self.runtime_client.execute_task(
                 workspace_id=action.workspace.id,
                 task_id=action.task.id,
                 tools=[self._convert_tool_to_json_schema(t) for t in self.tools],
                 messages=messages,
                 action=action.model_dump()
             )
+            logger.info(f"Runtime response: {response}")
         except Exception as error:
-            logger.error("Task execution failed: %s", str(error), exc_info=True)
+            logger.error(f"Task execution failed: {str(error)}", exc_info=True)
             # Don't re-raise the error to match TypeScript behavior
 
     async def respond_to_chat(self, action: RespondChatMessageAction) -> None:
