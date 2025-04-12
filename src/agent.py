@@ -128,6 +128,7 @@ class Agent:
             current_messages = params.messages.copy()
             max_iterations = 10
             iteration_count = 0
+            final_response = None
 
             while iteration_count < max_iterations:
                 logger.debug("Process iteration %d/%d", iteration_count + 1, max_iterations)
@@ -142,7 +143,7 @@ class Agent:
                 # Log the model being used
                 logger.info(f"Using OpenAI model: {self.config.openai.model}")
                 
-                completion = await self.openai_client.chat.completions.create(
+                completion = self.openai_client.chat.completions.create(
                     model=self.config.openai.model,
                     messages=current_messages,
                     tools=self.openai_tools if self.tools else None
@@ -154,9 +155,16 @@ class Agent:
                 last_message = completion.choices[0].message
                 logger.info(f"Received message from OpenAI: {last_message}")
 
+                # If no tool calls, we have our final response
                 if not last_message.tool_calls:
                     logger.info("No tool calls requested, returning completion")
-                    return completion.model_dump()
+                    final_response = last_message.content
+                    return {
+                        "response": final_response,
+                        "messages": current_messages + [last_message],
+                        "completed": True,
+                        "model_dump": completion.model_dump()
+                    }
 
                 logger.info(f"OpenAI requested {len(last_message.tool_calls)} tool calls")
                 tool_results = []
@@ -190,8 +198,43 @@ class Agent:
                         })
 
                 current_messages.extend([last_message, *tool_results])
+                
+                # If this is the last iteration or we've processed all needed tools,
+                # try to get a final response from the model
+                if iteration_count == max_iterations - 1 or len(tool_results) == len(last_message.tool_calls):
+                    try:
+                        final_completion = self.openai_client.chat.completions.create(
+                            model=self.config.openai.model,
+                            messages=current_messages
+                        )
+                        if final_completion.choices and final_completion.choices[0].message:
+                            final_message = final_completion.choices[0].message
+                            current_messages.append(final_message)
+                            final_response = final_message.content
+                            logger.info(f"Generated final response: {final_response[:100]}...")
+                            
+                            # Return early with the final response
+                            return {
+                                "response": final_response,
+                                "messages": current_messages,
+                                "completed": True,
+                                "model_dump": completion.model_dump()
+                            }
+                    except Exception as final_error:
+                        logger.error(f"Failed to generate final response: {str(final_error)}")
+                        # Continue with the loop if getting final response fails
+                
                 iteration_count += 1
 
+            # If we reached max iterations but collected tool results
+            if tool_results:
+                return {
+                    "response": "Task processed through tools but reached max iterations",
+                    "messages": current_messages,
+                    "completed": True,
+                    "model_dump": completion.model_dump()
+                }
+                
             raise RuntimeError('Max iterations reached without completion')
         except Exception as error:
             logger.error("Process failed: %s", str(error), exc_info=True)
@@ -204,17 +247,57 @@ class Agent:
             if body.get('type') == 'do-task':
                 logger.info("Processing do-task action")
                 action = DoTaskAction.model_validate(body)
-                # Fire and forget - don't await
-                asyncio.create_task(self.do_task(action))
+                
+                # To ensure consistent behavior with TypeScript, use create_task 
+                # but add better error reporting
+                task = asyncio.create_task(self.do_task(action))
+                
+                # Add a done callback to log any errors
+                def on_task_done(t):
+                    try:
+                        # This will re-raise any exception that occurred in do_task
+                        t.result()
+                    except Exception as e:
+                        logger.error(f"Task {action.task.id} failed: {str(e)}")
+                        if self.on_error:
+                            try:
+                                self.on_error(e)
+                            except Exception as callback_error:
+                                logger.error(f"Error in error callback: {str(callback_error)}")
+                
+                task.add_done_callback(on_task_done)
+                
             elif body.get('type') == 'respond-chat-message':
                 logger.info("Processing respond-chat-message action")
                 action = RespondChatMessageAction.model_validate(body)
+                
                 # Fire and forget - don't await
-                asyncio.create_task(self.respond_to_chat(action))
+                chat_task = asyncio.create_task(self.respond_to_chat(action))
+                
+                # Add a done callback to log any errors
+                def on_chat_done(t):
+                    try:
+                        # This will re-raise any exception that occurred in respond_to_chat
+                        t.result()
+                    except Exception as e:
+                        logger.error(f"Chat response failed: {str(e)}")
+                        if self.on_error:
+                            try:
+                                self.on_error(e)
+                            except Exception as callback_error:
+                                logger.error(f"Error in error callback: {str(callback_error)}")
+                
+                chat_task.add_done_callback(on_chat_done)
+                
             else:
-                raise ValueError('Invalid action type')
+                raise ValueError(f'Invalid action type: {body.get("type")}')
         except Exception as error:
             logger.error("Root route handler failed: %s", str(error), exc_info=True)
+            if self.on_error:
+                try:
+                    self.on_error(error)
+                except Exception as callback_error:
+                    logger.error(f"Error in error callback: {str(callback_error)}")
             raise
 
     async def handle_tool_route(self, tool_name: str, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -282,6 +365,7 @@ class Agent:
         logger.info(f"Available tools: {[tool.name for tool in self.tools]}")
 
         try:
+            # Simply delegate to the runtime - don't attempt local processing
             json_data = {
                 'workspace_id': action.workspace.id,
                 'task_id': action.task.id,
@@ -301,9 +385,10 @@ class Agent:
                 action=action.model_dump()
             )
             logger.info(f"Runtime response: {response}")
+            
         except Exception as error:
             logger.error(f"Task execution failed: {str(error)}", exc_info=True)
-            # Don't re-raise the error to match TypeScript behavior
+            # We don't try to mark the task as errored - let the platform handle it
 
     async def respond_to_chat(self, action: RespondChatMessageAction) -> None:
         """Handle a chat message response request."""
@@ -418,7 +503,7 @@ class Agent:
 
     async def create_task(self, params: CreateTaskParams) -> Dict[str, Any]:
         """Creates a new task in a workspace."""
-        response = await self.api_client.post(f"/workspaces/{params.workspace_id}/task", {
+        response = await self.api_client.post(f"/workspaces/{params.workspace_id}/tasks", {
             "assignee": params.assignee,
             "description": params.description,
             "body": params.body,

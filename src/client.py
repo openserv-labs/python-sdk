@@ -177,7 +177,7 @@ class OpenServClient(BaseClient):
         }
         return await self._request(
             'POST',
-            f'/workspaces/{workspace_id}/file',
+            f'/workspaces/{workspace_id}/files',
             files=files,
             json=data
         )
@@ -219,7 +219,8 @@ class RuntimeClient(BaseClient):
             'task_id': task_id,
             'tools': tools,
             'messages': messages,
-            'action': action
+            'action': action,
+            'auto_complete': True  # Signal to platform to automatically complete the task when processed
         }
         
         # Execute the request
@@ -236,8 +237,6 @@ class RuntimeClient(BaseClient):
                     logger.info(f"Task execution response received: {list(response.keys())}")
                     if 'success' in response and response['success']:
                         logger.info(f"Task {task_id} successfully initiated")
-                    if 'tools' in response:
-                        logger.info(f"Response includes tool info: {response.get('tools')}")
                 else:
                     logger.info(f"Task execution response type: {type(response)}")
             else:
