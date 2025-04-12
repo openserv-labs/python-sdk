@@ -278,7 +278,7 @@ class Agent:
             )
         except Exception as error:
             logger.error("Task execution failed: %s", str(error), exc_info=True)
-            raise
+            # Don't re-raise the error to match TypeScript behavior
 
     async def respond_to_chat(self, action: RespondChatMessageAction) -> None:
         """Handle a chat message response request."""
@@ -296,11 +296,14 @@ class Agent:
                 })
 
         try:
-            # Fire and forget - don't wait for or process response
+            # Include single_use parameter to tell the runtime to respond directly without looping through tools
+            # This matches how the TypeScript SDK handles chat
+            logger.info("Sending chat to runtime with %d messages", len(messages))
             await self.runtime_client.handle_chat(
                 tools=[self._convert_tool_to_json_schema(t) for t in self.tools],
                 messages=messages,
-                action=action.model_dump()
+                action=action.model_dump(),
+                single_use=True  # Indicate this should be a direct response, not a tool chain
             )
         except Exception as error:
             logger.error("Chat response failed: %s", str(error), exc_info=True)
@@ -384,7 +387,7 @@ class Agent:
         response = await self.api_client.get(f"/workspaces/{params.workspace_id}/agents")
         return response["data"]
 
-    async def get_tasks(self, params: GetTasksParams) -> Dict[str, Any]:
+    async def get_tasks_with_params(self, params: GetTasksParams) -> Dict[str, Any]:
         """Gets a list of tasks in a workspace."""
         response = await self.api_client.get(f"/workspaces/{params.workspace_id}/tasks")
         return response["data"]
@@ -413,7 +416,7 @@ class Agent:
         )
         return response["data"]
 
-    async def request_human_assistance(self, params: RequestHumanAssistanceParams) -> Dict[str, Any]:
+    async def request_human_assistance_with_params(self, params: RequestHumanAssistanceParams) -> Dict[str, Any]:
         """Requests human assistance for a task."""
         response = await self.api_client.post(
             f"/workspaces/{params.workspace_id}/tasks/{params.task_id}/human-assistance",
