@@ -302,9 +302,9 @@ class Agent:
                 tools=[self._convert_tool_to_json_schema(t) for t in self.tools],
                 messages=messages,
                 action=action.model_dump(),
-                direct_response=True  # Add flag to prevent tool call loops
+                single_use=True  # Changed from direct_response to single_use to match the parameter name in RuntimeClient
             )
-        except Exception as error:
+        except Exception as error:  # Fixed variable name from "err" to "error"
             logger.error("Chat response failed: %s", str(error), exc_info=True)
             # Don't re-raise the error to match TypeScript behavior
 
