@@ -40,6 +40,18 @@ class BaseClient:
         """Close the HTTP client."""
         await self.client.aclose()
     
+    async def get(self, path: str, params: Optional[Dict[str, str]] = None) -> Optional[Dict[str, Any]]:
+        """Make a GET request to the API."""
+        return await self._request('GET', path, params=params)
+        
+    async def post(self, path: str, json_data: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        """Make a POST request to the API."""
+        return await self._request('POST', path, json_data=json_data)
+        
+    async def put(self, path: str, json_data: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+        """Make a PUT request to the API."""
+        return await self._request('PUT', path, json_data=json_data)
+    
     async def _request(
         self,
         method: str,
@@ -175,14 +187,20 @@ class RuntimeClient(BaseClient):
         tools: List[Dict[str, Any]],
         messages: List[Dict[str, str]],
         action: Dict[str, Any],
+        single_use: bool = False
     ) -> Optional[Dict[str, Any]]:
         """Handle a chat request."""
+        json_data = {
+            "tools": tools,
+            "messages": messages,
+            "action": action,
+        }
+        
+        if single_use:
+            json_data["single_use"] = True
+            
         return await self._request(
             "POST",
             "/chat",
-            json_data={
-                "tools": tools,
-                "messages": messages,
-                "action": action,
-            },
+            json_data=json_data,
         ) 
