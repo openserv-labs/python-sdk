@@ -58,5 +58,5 @@ class Capability(Generic[T]):
         else:
             # Convert sync function to async
             async def async_run(args, messages) -> str:
-                return run(self, args, messages)
+                return run(args, messages)
             self.run = async_run
