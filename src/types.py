@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Optional, List, Dict, Any, Union, Literal
+from typing import Optional, List, Dict, Any, Union, Literal, Callable
 from pydantic import BaseModel, Field
 from datetime import datetime
 
@@ -111,6 +111,8 @@ class AgentOptions(BaseModel):
     api_key: Optional[str] = None
     openai_api_key: Optional[str] = None
     port: Optional[int] = None
+    model: Optional[str] = None
+    on_error: Optional[Callable[[Exception, Dict[str, Any]], None]] = None
 
 class GetFilesParams(BaseModel):
     workspace_id: int
