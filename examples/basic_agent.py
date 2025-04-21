@@ -1,229 +1,191 @@
 """
 Basic agent implementation for the OpenServ Python SDK.
+
+This example demonstrates the core components of the OpenServ SDK:
+
+1. Agent: The main class that handles communication with the OpenServ platform
+2. Capability: Reusable functions that your agent can perform
+3. Schema: Type definitions for your capabilities' inputs using Pydantic
+4. Message Handling: How to process and respond to user messages
+5. System Prompt: Provides context for the LLM that define the agent's personality and behavior
+
+This agent implements three simple capabilities to demonstrate these concepts.
 """
 
 from src import Agent, Capability
 from src import AgentOptions
 from pydantic import BaseModel
 import os
-import json
 import logging
-from typing import Dict, Any, List
 from src.types import RespondChatMessageAction
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
+# Load environment variables stored in .env file
 load_dotenv()
 
-# Configure logging
+# Configure Python's logging for debugging and monitoring
 logger = logging.getLogger(__name__)
 
-# Load system prompt from file
+# Load system prompt that defines the agent's personality and behavior and provides context for the LLM
 with open("examples/system_basic_agent.md", "r") as f:
     system_prompt = f.read()
 
-# Define argument models
+# Define schemas using Pydantic for automatic validation and type checking
+# Schemas define the expected input structure for each capability
 class GreetArgs(BaseModel):
     name: str
 
 class FarewellArgs(BaseModel):
     name: str
 
-class HelpArgs(BaseModel):  # Define an empty schema for the help command
+class HelpArgs(BaseModel):
     pass
 
-# Define async functions for capabilities
-async def greet_run(data, messages):
-    # Handle both direct calls and runtime calls
-    if hasattr(data, 'name'):
-        name = data.name
-    elif hasattr(data, 'args') and isinstance(data.args, dict):
-        name = data.args.get("name", "")
-    else:
-        name = "there"
-    return f"Hello, {name}! How can I help you today?"
-
-async def farewell_run(data, messages):
-    # Handle both direct calls and runtime calls
-    if hasattr(data, 'name'):
-        name = data.name
-    elif hasattr(data, 'args') and isinstance(data.args, dict):
-        name = data.args.get("name", "")
-    else:
-        name = "there"
-    return f"Goodbye, {name}! Have a great day!"
-
-async def help_run(data, messages):
-    return "Available commands: greet, farewell, help"
-
-# Custom agent class to override respond_to_chat method
-class BasicAgent(Agent):
-    async def respond_to_chat(self, action: RespondChatMessageAction) -> None:
-        """Handle a chat message response request with direct handling instead of runtime processing."""
-        messages = [
-            {'role': 'system', 'content': self.config.system_prompt}
-        ]
-
-        last_message = None
-        if action.messages:
-            for msg in action.messages:
-                message_obj = {
-                    'role': 'user' if msg.author == 'user' else 'assistant',
-                    'content': msg.message,
-                    'id': msg.id,
-                    'createdAt': msg.createdAt.isoformat()
-                }
-                messages.append(message_obj)
-                if msg.author == 'user':
-                    last_message = msg.message
-
-        try:
-            # Instead of using runtime, extract the name from the message and respond directly
-            # This avoids the loop issue by not going through the runtime's tool calling system
-            response = None
-            
-            # Simple message parsing for demo purposes
-            if last_message and 'greet' in last_message.lower():
-                # Extract name if present
-                name = "there"  # Default
-                
-                # Handle "I am [Name]" pattern
-                if "i am " in last_message.lower():
-                    name_part = last_message.lower().split("i am ")[1]
-                    name = name_part.split(',')[0].split('.')[0].strip()
-                # Handle "my name is [Name]" pattern
-                elif "my name is " in last_message.lower():
-                    name_part = last_message.lower().split("my name is ")[1]
-                    name = name_part.split(',')[0].split('.')[0].strip()
-                # Handle direct name mentions
-                else:
-                    # Look for names before or after commas that aren't common words
-                    parts = last_message.split(',')
-                    for part in parts:
-                        # Clean up the part
-                        clean_part = part.strip().lower()
-                        # Skip common words and commands
-                        if (clean_part and not clean_part in ["i", "me", "greet", "hello", "hi"]
-                                and len(clean_part) > 2):
-                            name = clean_part
-                            break
-                
-                # Capitalize the first letter of the name for politeness
-                if name != "there":
-                    name = name.capitalize()
-                
-                logger.info(f"Extracted name: {name}")
-                
-                # Use our greet capability directly
-                greet_tool = next((t for t in self.tools if t.name == "greet"), None)
-                if greet_tool:
-                    response = await greet_tool.run(GreetArgs(name=name), messages)
-            elif last_message and 'help' in last_message.lower():
-                help_tool = next((t for t in self.tools if t.name == "help"), None)
-                if help_tool:
-                    response = await help_tool.run(HelpArgs(), messages)
-            elif last_message and any(word in last_message.lower() for word in ['goodbye', 'bye', 'farewell']):
-                # Extract name using the same improved logic
-                name = "there"  # Default
-                
-                # Handle "I am [Name]" pattern
-                if "i am " in last_message.lower():
-                    name_part = last_message.lower().split("i am ")[1]
-                    name = name_part.split(',')[0].split('.')[0].strip()
-                # Handle "my name is [Name]" pattern
-                elif "my name is " in last_message.lower():
-                    name_part = last_message.lower().split("my name is ")[1]
-                    name = name_part.split(',')[0].split('.')[0].strip()
-                # Handle direct name mentions
-                else:
-                    # Look for names before or after commas that aren't common words
-                    parts = last_message.split(',')
-                    for part in parts:
-                        # Clean up the part
-                        clean_part = part.strip().lower()
-                        # Skip common words and commands
-                        if (clean_part and not clean_part in ["i", "me", "farewell", "goodbye", "bye"]
-                                and len(clean_part) > 2):
-                            name = clean_part
-                            break
-                
-                # Capitalize the first letter of the name for politeness
-                if name != "there":
-                    name = name.capitalize()
-                    
-                logger.info(f"Extracted name: {name}")
-                
-                farewell_tool = next((t for t in self.tools if t.name == "farewell"), None)
-                if farewell_tool:
-                    response = await farewell_tool.run(FarewellArgs(name=name), messages)
-            
-            # If no specific command was detected, provide a default response
-            if not response:
-                response = "I'm a basic agent that can greet you, say goodbye, or provide help. Try asking for one of these!"
-            
-            # Send the response back to the user using the proper API client method
-            if action.me and action.workspace:
-                # Use the new post method added to BaseClient
-                await self.api_client.post(
-                    f"/workspaces/{action.workspace.id}/agent-chat/{action.me.id}/message",
-                    {"message": response}
-                )
-                
-            logger.info(f"Direct response sent: {response}")
-            
-        except Exception as error:
-            logger.error("Chat response failed: %s", str(error), exc_info=True)
-            # Don't re-raise the error to match TypeScript behavior
-
-# Initialize the agent
 def create_agent() -> Agent:
+    """Create and configure the agent
     
-    # Get API keys from environment variables
-    api_key = os.getenv('OPENSERV_API_KEY')
-    openai_api_key = os.getenv('OPENAI_API_KEY')
+    1. Initialize an agent with configuration
+    2. Add capabilities (tools) to the agent
+    3. Set up the agent for handling messages
     
-    if not api_key:
-        raise ValueError("OPENSERV_API_KEY environment variable is not set")
-    
-    agent = BasicAgent(  # Use our custom BasicAgent class instead
+    The agent is the core component that:
+    - Manages communication with the OpenServ platform
+    - Handles incoming messages
+    - Executes capabilities
+    - Sends responses back to users
+    """
+
+    agent = Agent(
         AgentOptions(
-            api_key=api_key,
-            openai_api_key=openai_api_key,
-            system_prompt=system_prompt
+            system_prompt=system_prompt,
+            api_key=os.getenv('OPENSERV_API_KEY'),
+            openai_api_key=os.getenv('OPENAI_API_KEY')
         )
     )
 
-    # Create and add capabilities
-    greet_capability = Capability(
-        name="greet",
-        description="Greet a user by name",
-        schema=GreetArgs,
-        run=greet_run
-    )
-
-    farewell_capability = Capability(
-        name="farewell",
-        description="Say goodbye to a user",
-        schema=FarewellArgs,
-        run=farewell_run
-    )
-
-    help_capability = Capability(
-        name="help",
-        description="Show available commands",
-        schema=HelpArgs,
-        run=help_run
-    )
-
-    # Add capabilities to agent
+    # Add capabilities 
+    # Capabilities are reusable functions your agent can perform
+    # Each capability has:
+    # - name: Unique identifier
+    # - description: What the capability does
+    # - schema: Input validation rules
+    # - run: The function that implements the capability
     agent.add_capabilities([
-        greet_capability,
-        farewell_capability,
-        help_capability
+        # Greet capability
+        Capability(
+            name="greet",
+            description="Greet a user by name",
+            schema=GreetArgs,
+            run=lambda data, _: f"Hello, {data.name}! How can I help you today?"
+        ),
+        
+        # Farewell capability
+        Capability(
+            name="farewell",
+            description="Say goodbye to a user",
+            schema=FarewellArgs,
+            run=lambda data, _: f"Goodbye, {data.name}! Have a great day!"
+        ),
+        
+        # Help capability
+        Capability(
+            name="help",
+            description="Show available commands",
+            schema=HelpArgs,
+            run=lambda _, __: "Available commands: greet, farewell, help"
+        )
     ])
 
     return agent
 
+# Custom agent class with simplified message handling
+# This shows how to extend the base Agent class to add custom behavior
+class BasicAgent(Agent):
+    async def respond_to_chat(self, action: RespondChatMessageAction) -> None:
+        """Handle chat messages in a more straightforward way
+        
+        This method demonstrates how the SDK processes messages:
+        1. Receives a message from the user
+        2. Determines which capability to use
+        3. Extracts necessary information from the message
+        4. Executes the appropriate capability
+        5. Sends the response back to the user
+        
+        The RespondChatMessageAction contains:
+        - messages: The conversation history
+        - me: Information about the agent
+        - workspace: Information about the workspace
+        """
+        if not action.messages:
+            return
+
+        last_message = action.messages[-1].message
+        response = None
+
+        # Simple command detection
+        # This shows how to route messages to different capabilities
+        if 'greet' in last_message.lower():
+            name = extract_name(last_message)
+            greet_tool = next((t for t in self.tools if t.name == "greet"), None)
+            if greet_tool:
+                response = await greet_tool.run(GreetArgs(name=name), [])
+        
+        elif 'help' in last_message.lower():
+            help_tool = next((t for t in self.tools if t.name == "help"), None)
+            if help_tool:
+                response = await help_tool.run(HelpArgs(), [])
+        
+        elif any(word in last_message.lower() for word in ['goodbye', 'bye', 'farewell']):
+            name = extract_name(last_message)
+            farewell_tool = next((t for t in self.tools if t.name == "farewell"), None)
+            if farewell_tool:
+                response = await farewell_tool.run(FarewellArgs(name=name), [])
+
+        # Default response if no command is detected
+        if not response:
+            response = "I'm a basic agent that can greet you, say goodbye, or provide help. Try asking for one of these!"
+
+        # Send response back to the user
+        # The SDK handles the HTTP communication with the OpenServ platform
+        if action.me and action.workspace:
+            await self.api_client.post(
+                f"/workspaces/{action.workspace.id}/agent-chat/{action.me.id}/message",
+                {"message": response}
+            )
+
+def extract_name(message: str) -> str:
+    """Helper function to extract name from message
+    
+    This demonstrates how to:
+    1. Parse user input
+    2. Extract structured data from natural language
+    3. Handle different input formats
+    
+    The SDK doesn't handle this directly - it's up to you to implement
+    the logic for extracting information from user messages.
+    """
+    message = message.lower()
+    
+    if "i am " in message:
+        return message.split("i am ")[1].split(',')[0].split('.')[0].strip().capitalize()
+    elif "my name is " in message:
+        return message.split("my name is ")[1].split(',')[0].split('.')[0].strip().capitalize()
+    
+    # Look for names in comma-separated parts
+    parts = message.split(',')
+    for part in parts:
+        clean_part = part.strip()
+        if (clean_part and not clean_part in ["i", "me", "greet", "hello", "hi", "farewell", "goodbye", "bye"]
+                and len(clean_part) > 2):
+            return clean_part.capitalize()
+    
+    return "there"
+
 if __name__ == '__main__':
+    # Create and start the agent
+    # The start() method:
+    # 1. Initializes the HTTP server
+    # 2. Sets up routes for handling messages
+    # 3. Starts listening for incoming requests
     agent = create_agent()
     agent.start()
