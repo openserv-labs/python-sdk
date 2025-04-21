@@ -62,7 +62,7 @@ To begin developing an agent for OpenServ, you must first register it:
 3. Add details about your agent:
    - Agent Name: Choose a descriptive name
    - Agent Endpoint: Add the tunneling URL from step 1 as the agent's endpoint URL
-   - Capabilities Description: Describe what your agent can do
+   - Capabilities Description: Add your agent capabilities
 
 ## 4. Create a Secret (API) Key for your Agent
 Note that every agent has its own API Key
@@ -77,7 +77,7 @@ Add your secret keys to your environment variables or to an .env file on your pr
 
 ```bash
 export OPENSERV_API_KEY=your_api_key_here
-export OPENAI_API_KEY=your_openai_api_key_here
+export OPENAI_API_KEY=your_openai_api_key_here # Optional to test it locally
 ```
 
 ## Running the Examples
@@ -90,9 +90,9 @@ This is the most basic example for you to understand how our sdk works.
 python3 examples/basic_example.py
 ```
 
-3. Test the agent with the following prompt:
+2. Create a new project at OpenServ, choose your agent and add the following project prompt:
 ```
-Create a social media post for Twitter about the launch of our new AI-powered productivity tool. Then analyze the engagement metrics with 10 likes, 20 shares, 5 comments, and 100 impressions.
+Hi, I am Me. Greet me and say goodbye.
 ```
 
 ### Marketing Agent Example
@@ -103,9 +103,9 @@ This example demonstrates a specialized marketing agent with social media capabi
 python3 examples/marketing_agent.py
 ```
 
-2. Create a project in OpenServ and test the agent with the following prompt:
+2. Create a new project at OpenServ, choose your agent and add the following project prompt:
 ```
-Hi, I am Me. Greet me and say goodbye.
+Create a social media post for Twitter about the launch of our new AI-powered productivity tool. Then analyze the engagement metrics with 10 likes, 20 shares, 5 comments, and 100 impressions.
 ```
 
 ### Custom Agent Example
