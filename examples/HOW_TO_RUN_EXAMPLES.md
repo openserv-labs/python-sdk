@@ -163,19 +163,23 @@ response = result["response"]
 print(response)
 ```
 
-To run a full example showcasing this functionality:
+To run a full educational demonstration of the process() method:
 
 ```bash
-python examples/local_example.py
+python examples/basic_agent.py
 ```
 
-This example demonstrates:
-- Setting up an agent with the OpenAI API key
-- Adding capabilities 
+This example includes:
+- A step-by-step walkthrough with explanations
+- Creating an agent with the OpenAI API key
+- Adding capabilities and seeing them used as tools
 - Processing messages locally without starting the server
-- Using tool calls through the OpenAI API
+- Detailed explanations of how process() works behind the scenes
+- Comparison of both simple and tool-using examples
 
-This makes it easy to develop and test your agent's logic before deploying it to the OpenServ platform.
+The demonstration mode is enabled by default in the basic_agent.py file. You can switch to the regular server mode by changing the `DEMO_MODE` variable to `False` in the file.
+
+This interactive tutorial makes it easy to understand and develop your agent's logic before deploying it to the OpenServ platform.
 
 ## Troubleshooting
 
