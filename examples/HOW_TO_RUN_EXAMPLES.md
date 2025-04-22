@@ -103,7 +103,7 @@ This example demonstrates a specialized marketing agent with social media capabi
 python3 examples/marketing_agent.py
 ```
 
-2. Create a new project at OpenServ, choose your agent and add the following project prompt:
+2. Create a new project at OpenServ, choose your agent and add the following project prompt. When creating the agent, add Twitter integration to your agent. 
 ```
 Create a social media post for Twitter about the launch of our new AI-powered productivity tool. Then analyze the engagement metrics with 10 likes, 20 shares, 5 comments, and 100 impressions.
 ```
