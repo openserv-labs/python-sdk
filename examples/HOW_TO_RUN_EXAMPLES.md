@@ -139,6 +139,44 @@ python3 examples/twitter_agent.py
 Get my Twitter account information and then send a marketing tweet about our new product launch.
 ```
 
+## Local Testing with OpenAI API
+
+One powerful feature of the SDK is the ability to test your agents locally using the OpenAI API without needing to deploy them to the OpenServ platform. This is particularly useful during development:
+
+### Using process() for Local Testing
+
+The `process()` method allows you to send messages directly to OpenAI and get responses, using your agent's capabilities locally:
+
+```python
+# Example of using process() for local testing
+result = await agent.process({
+    "messages": [
+        {
+            "role": "user",
+            "content": "Your message here"
+        }
+    ]
+})
+
+# The response contains the model's reply
+response = result["response"]
+print(response)
+```
+
+To run a full example showcasing this functionality:
+
+```bash
+python examples/local_example.py
+```
+
+This example demonstrates:
+- Setting up an agent with the OpenAI API key
+- Adding capabilities 
+- Processing messages locally without starting the server
+- Using tool calls through the OpenAI API
+
+This makes it easy to develop and test your agent's logic before deploying it to the OpenServ platform.
+
 ## Troubleshooting
 
 If you encounter any issues:
