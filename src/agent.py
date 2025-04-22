@@ -9,6 +9,7 @@ import asyncio
 import signal
 from pydantic import BaseModel
 import json
+import inspect
 
 # Configure logging to show INFO and above
 logging.basicConfig(level=logging.INFO)
@@ -444,13 +445,14 @@ class Agent:
 
     async def upload_file(self, workspace_id: int, path: str, file: Union[str, bytes], task_ids: Optional[List[int]] = None, skip_summarizer: bool = False) -> Dict[str, Any]:
         """Upload a file to a workspace."""
-        response = await self.api_client.post(f"/workspaces/{workspace_id}/files", {
-            "path": path,
-            "file": file,
-            "taskIds": task_ids,
-            "skipSummarizer": skip_summarizer
-        })
-        return response["data"]
+        # Delegate to the OpenServClient which has the proper implementation
+        return await self.api_client.upload_file(
+            workspace_id=workspace_id,
+            path=path,
+            file_content=file,
+            task_ids=task_ids,
+            skip_summarizer=skip_summarizer
+        )
 
     async def get_tasks(self, workspace_id: int) -> Dict[str, Any]:
         """Get tasks in a workspace."""
@@ -473,7 +475,7 @@ class Agent:
 
     async def send_chat_message(self, workspace_id: int, agent_id: int, message: str) -> Dict[str, Any]:
         """Send a chat message."""
-        response = await self.api_client.post(f"/workspaces/{workspace_id}/agents/{agent_id}/chat", {
+        response = await self.api_client.post(f"/workspaces/{workspace_id}/agent-chat/{agent_id}/message", {
             "message": message
         })
         return response["data"]
@@ -557,3 +559,47 @@ class Agent:
             integration.details.model_dump()
         )
         return response["data"]
+
+    async def send_message(self, message: str) -> Dict[str, Any]:
+        """
+        Convenience method to send a message in the current chat context.
+        This is used in respond_to_chat implementations to reply to users.
+        
+        Args:
+            message: The message content to send
+            
+        Returns:
+            The response data from the API
+        """
+        # Check if we're currently processing a chat message
+        # This is determined by looking at the call stack - respond_to_chat should be in the call stack
+        call_stack = inspect.stack()
+        called_from_respond_to_chat = any('respond_to_chat' in frame.function for frame in call_stack)
+        
+        if not called_from_respond_to_chat:
+            logger.warning("send_message called outside of respond_to_chat context")
+            return {"error": "send_message should be called from within respond_to_chat"}
+            
+        # Find the current action in the call stack
+        action = None
+        for frame in call_stack:
+            if frame.function == 'respond_to_chat':
+                # Look for the 'action' parameter in local variables
+                if 'action' in frame.frame.f_locals:
+                    action = frame.frame.f_locals['action']
+                    break
+                    
+        if not action or not isinstance(action, RespondChatMessageAction):
+            logger.error("Failed to find valid action in respond_to_chat context")
+            return {"error": "No valid action found"}
+            
+        # Now we have the action, we can send the message
+        if not action.me or not action.workspace:
+            logger.error("Missing required action fields (me or workspace)")
+            return {"error": "Missing required action fields"}
+            
+        return await self.send_chat_message(
+            workspace_id=action.workspace.id,
+            agent_id=action.me.id,
+            message=message
+        )
