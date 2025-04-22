@@ -58,6 +58,7 @@ class BaseClient:
         path: str,
         json_data: Optional[Dict[str, Any]] = None,
         params: Optional[Dict[str, str]] = None,
+        files: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Make an HTTP request and handle common error cases."""
         logger = logging.getLogger(__name__)
@@ -65,20 +66,34 @@ class BaseClient:
             # Pre-serialize JSON with our custom encoder
             content = None
             headers = {}
-            if json_data is not None:
-                content = json.dumps(json_data, cls=DateTimeEncoder).encode('utf-8')
-                headers['Content-Type'] = 'application/json'
-                logger.debug(f"Sending {method} request to {path} with data size: {len(content)} bytes")
+            
+            # Handle file uploads with multipart/form-data
+            if files is not None:
+                logger.debug(f"Sending {method} request to {path} with files")
+                # For multipart form data, let httpx handle the content
+                response = await self.client.request(
+                    method,
+                    path,
+                    params=params,
+                    files=files,
+                    data=json_data,  # For file uploads, json_data is sent as form fields
+                )
             else:
-                logger.debug(f"Sending {method} request to {path} without data")
+                # Normal JSON request
+                if json_data is not None:
+                    content = json.dumps(json_data, cls=DateTimeEncoder).encode('utf-8')
+                    headers['Content-Type'] = 'application/json'
+                    logger.debug(f"Sending {method} request to {path} with data size: {len(content)} bytes")
+                else:
+                    logger.debug(f"Sending {method} request to {path} without data")
 
-            response = await self.client.request(
-                method,
-                path,
-                content=content,
-                params=params,
-                headers=headers,
-            )
+                response = await self.client.request(
+                    method,
+                    path,
+                    content=content,
+                    params=params,
+                    headers=headers,
+                )
             
             logger.info(f"Response status: {response.status_code}")
             logger.debug(f"Response headers: {response.headers}")
@@ -169,17 +184,28 @@ class OpenServClient(BaseClient):
         skip_summarizer: Optional[bool] = None
     ) -> Dict[str, Any]:
         """Upload a file to a workspace."""
+        # Create files dictionary for multipart upload
         files = {'file': ('file', file_content)}
-        data = {
-            'path': path,
-            'taskIds': str(task_ids) if task_ids else None,
-            'skipSummarizer': str(skip_summarizer) if skip_summarizer is not None else None
-        }
+        
+        # Create form data (not JSON)
+        data = {'path': path}
+        
+        # Add optional parameters if they are provided
+        if task_ids is not None:
+            if isinstance(task_ids, list):
+                data['taskIds'] = json.dumps(task_ids)
+            else:
+                data['taskIds'] = str(task_ids)
+                
+        if skip_summarizer is not None:
+            data['skipSummarizer'] = str(skip_summarizer).lower()
+            
+        # Use form data instead of JSON for file uploads
         return await self._request(
             'POST',
             f'/workspaces/{workspace_id}/files',
-            files=files,
-            json=data
+            json_data=data,  # This will be sent as form fields with files
+            files=files
         )
 
 class RuntimeClient(BaseClient):
