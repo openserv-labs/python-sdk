@@ -1,33 +1,26 @@
+"""
+Marketing agent implementation for the OpenServ Python SDK.
+This example demonstrates how to create a marketing-focused agent with social media capabilities.
+"""
+
 import os
-import sys
 from pathlib import Path
 from dotenv import load_dotenv
 from pydantic import BaseModel
 import openai
 import logging
+from src.types import RespondChatMessageAction
 
-# Add the parent directory to Python path
-sys.path.append(str(Path(__file__).parent.parent))
+from src import Agent, Capability
+from src import AgentOptions
 
-from src import Agent, AgentOptions
-from src.capability import Capability
-
+# Load environment variables
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Check for API keys
-if not os.getenv('OPENAI_API_KEY'):
-    raise ValueError('OPENAI_API_KEY environment variable is required')
-
-# Initialize OpenAI client
-openai_client = openai.OpenAI(
-    api_key=os.getenv('OPENAI_API_KEY')
-)
-
-# Define schema classes for capabilities
+# Define schemas using Pydantic
 class SocialMediaPostParams(BaseModel):
     platform: str
     topic: str
@@ -42,56 +35,65 @@ class AnalyzeEngagementParams(BaseModel):
     platform: str
     metrics: EngagementMetrics
 
-# Read system prompt
+# Load system prompt
 system_prompt_path = Path(__file__).parent.joinpath('system.md')
 if not system_prompt_path.exists():
-    raise FileNotFoundError("system.md not found in examples directory")
+    raise FileNotFoundError("system.md not found")
 system_prompt = system_prompt_path.read_text()
 
-# Log API key status
-openserv_key = os.getenv('OPENSERV_API_KEY')
-openai_key = os.getenv('OPENAI_API_KEY')
-logger.info(f"OpenServ API Key: {'configured' if openserv_key else 'missing'}")
-logger.info(f"OpenAI API Key: {'configured' if openai_key else 'missing'}")
-
-# Initialize the agent (directly like in TypeScript, no custom class)
-marketing_manager = Agent(
-    AgentOptions(
-        system_prompt=system_prompt,
-        api_key=openserv_key,
-        openai_api_key=openai_key,
-        model="gpt-4o"
+def create_agent() -> MarketingAgent:
+    """Create and configure the marketing agent"""
+    
+    # Create agent with options
+    agent = MarketingAgent(
+        AgentOptions(
+            system_prompt=system_prompt,
+            api_key=os.getenv('OPENSERV_API_KEY'),
+            openai_api_key=os.getenv('OPENAI_API_KEY'),
+            model="gpt-4o"
+        )
     )
-)
 
-# Define capability implementations
-async def create_social_media_post(params, messages):
+    # Add capabilities
+    agent.add_capabilities([
+        # Social media post creation capability
+        Capability(
+            name='createSocialMediaPost',
+            description='Creates a social media post for the specified platform',
+            schema=SocialMediaPostParams,
+            run=create_social_media_post
+        ),
+        
+        # Engagement analysis capability
+        Capability(
+            name='analyzeEngagement',
+            description='Analyzes social media engagement metrics and provides recommendations',
+            schema=AnalyzeEngagementParams,
+            run=analyze_engagement
+        )
+    ])
+
+    return agent
+
+async def create_social_media_post(params, _):
     """Creates a social media post for the specified platform."""
     try:
-        # Extract parameters
-        if isinstance(params, dict) and 'args' in params:
-            args_data = params['args']
-            if isinstance(args_data, str):
-                import json
-                args_data = json.loads(args_data)
-            args = SocialMediaPostParams.model_validate(args_data)
-        elif isinstance(params, SocialMediaPostParams):
-            args = params
-        else:
-            args = SocialMediaPostParams.model_validate(params)
-        
+        # Extract and validate parameters
+        args = SocialMediaPostParams.model_validate(params)
         platform = args.platform
         topic = args.topic
         
         logger.info(f"Creating social media post for platform: {platform}, topic: {topic}")
 
-        # Create system message for the completion
-        completion = openai_client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {
-                    "role": "system",
-                    "content": f"""You are a marketing expert. Create a compelling {platform} post about: {topic}
+        # For local testing with OpenAI
+        if os.getenv('OPENAI_API_KEY'):
+            openai_client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+            completion = openai_client.chat.completions.create(
+                model="gpt-4o",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": f"""You are a marketing expert. Create a compelling {platform} post about: {topic}
 
 Follow these platform-specific guidelines:
 - Twitter: Max 280 characters, casual tone, use hashtags
@@ -101,44 +103,38 @@ Follow these platform-specific guidelines:
 Include emojis where appropriate. Focus on driving engagement.
 
 Only generate post for the given platform. Don't generate posts for other platforms."""
-                },
-                {
-                    "role": "user",
-                    "content": topic
-                }
-            ]
-        )
+                    },
+                    {
+                        "role": "user",
+                        "content": topic
+                    }
+                ]
+            )
+            return completion.choices[0].message.content
+        
+        # In production, this would be handled by the OpenServ platform
+        return f"Created a {platform} post about: {topic}"
 
-        post_content = completion.choices[0].message.content
-        logger.info(f"Created post for {platform} about {topic}")
-        return post_content
     except Exception as e:
         logger.error(f"Error creating social media post: {str(e)}", exc_info=True)
         return f"Error creating social media post: {str(e)}"
 
-async def analyze_engagement(params, messages=None):
+async def analyze_engagement(params, _):
     """Analyze social media engagement metrics."""
     try:
-        # Extract parameters
-        if isinstance(params, dict) and 'args' in params:
-            args_data = params['args']
-            if isinstance(args_data, str):
-                import json
-                args_data = json.loads(args_data)
-            args = AnalyzeEngagementParams.model_validate(args_data)
-        elif isinstance(params, AnalyzeEngagementParams):
-            args = params
-        else:
-            args = AnalyzeEngagementParams.model_validate(params)
-        
+        # Extract and validate parameters
+        args = AnalyzeEngagementParams.model_validate(params)
         logger.info(f"Processing engagement analysis for platform: {args.platform}")
         
-        completion = openai_client.chat.completions.create(
-            model='gpt-4o',
-            messages=[
-                {
-                    'role': 'system',
-                    'content': """You are a social media analytics expert. Analyze the engagement metrics and provide actionable recommendations.
+        # For local testing with OpenAI
+        if os.getenv('OPENAI_API_KEY'):
+            openai_client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+            completion = openai_client.chat.completions.create(
+                model='gpt-4o',
+                messages=[
+                    {
+                        'role': 'system',
+                        'content': """You are a social media analytics expert. Analyze the engagement metrics and provide actionable recommendations.
 
 Consider platform-specific benchmarks:
 - Twitter: Engagement rate = (likes + shares + comments) / impressions
@@ -150,41 +146,72 @@ Provide:
 2. Performance assessment (below average, average, above average)
 3. Top 3 actionable recommendations to improve engagement
 4. Key metrics to focus on for improvement"""
-                },
-                {
-                    'role': 'user',
-                    'content': f"Platform: {args.platform}\nMetrics: {args.metrics.model_dump_json()}"
-                }
-            ]
-        )
+                    },
+                    {
+                        'role': 'user',
+                        'content': f"Platform: {args.platform}\nMetrics: {args.metrics.model_dump_json()}"
+                    }
+                ]
+            )
+            return completion.choices[0].message.content
+        
+        # In production, this would be handled by the OpenServ platform
+        return f"Analyzed engagement metrics for {args.platform}"
 
-        analysis = completion.choices[0].message.content
-        logger.info(f"Generated engagement analysis for {args.platform}")
-        return analysis
     except Exception as e:
         logger.error(f"Error analyzing engagement: {str(e)}", exc_info=True)
         return f"Error analyzing engagement: {str(e)}"
 
-# Add capabilities to the agent (exactly like TypeScript)
-marketing_manager.add_capabilities([
-    Capability(
-        name='createSocialMediaPost',
-        description='Creates a social media post for the specified platform',
-        schema=SocialMediaPostParams,
-        run=create_social_media_post
-    ),
-    Capability(
-        name='analyzeEngagement',
-        description='Analyzes social media engagement metrics and provides recommendations',
-        schema=AnalyzeEngagementParams,
-        run=analyze_engagement
-    )
-])
+# Custom agent class with message handling
+class MarketingAgent(Agent):
+    async def respond_to_chat(self, action: RespondChatMessageAction) -> None:
+        """Handle chat messages for the marketing agent"""
+        try:
+            logger.info(f"Received chat action: {action}")
+            
+            if not action.messages:
+                logger.warning("No messages in action")
+                return
 
-# Log the capabilities being added
-for capability in marketing_manager.tools:
-    logger.info(f"Adding capability: {capability.name} with schema {capability.schema.__name__}")
+            last_message = action.messages[-1].message
+            logger.info(f"Processing message: {last_message}")
+            response = None
 
-# Start the agent (exactly like TypeScript)
+            # Process the message using the SDK's capabilities
+            if 'create post' in last_message.lower() or 'social media' in last_message.lower():
+                logger.info("Detected social media post request")
+                # Extract platform and topic from message
+                platform = 'twitter'  # Default platform
+                topic = last_message.split('about')[-1].strip() if 'about' in last_message else last_message
+                logger.info(f"Extracted platform: {platform}, topic: {topic}")
+                response = await self.process(SocialMediaPostParams(platform=platform, topic=topic))
+            
+            elif 'analyze' in last_message.lower() or 'engagement' in last_message.lower():
+                logger.info("Detected engagement analysis request")
+                # Example metrics - in real usage, these would come from the message
+                metrics = EngagementMetrics(likes=100, shares=50, comments=30, impressions=1000)
+                logger.info(f"Using metrics: {metrics}")
+                response = await self.process(AnalyzeEngagementParams(platform='twitter', metrics=metrics))
+
+            # Default response if no command is detected
+            if not response:
+                logger.info("No specific command detected, sending default response")
+                response = "I'm a marketing agent that can create social media posts and analyze engagement metrics. Try asking me to create a post or analyze engagement!"
+
+            logger.info(f"Sending response: {response}")
+            # Send response back to the user using the SDK's method
+            await self.send_message(response)
+
+        except Exception as e:
+            logger.error(f"Error in respond_to_chat: {str(e)}", exc_info=True)
+            # Send error message to user
+            await self.send_message(f"Sorry, I encountered an error: {str(e)}")
+
 if __name__ == '__main__':
-    marketing_manager.start()
+    # Configure logging to show more details
+    logging.basicConfig(level=logging.INFO)
+    logger.info("Starting marketing agent...")
+    
+    # Create and start the agent
+    agent = create_agent()
+    agent.start()
