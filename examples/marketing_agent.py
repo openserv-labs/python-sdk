@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 import openai
 import logging
-from src.types import RespondChatMessageAction
+from src.types import RespondChatMessageAction, ProcessParams
 
 from src import Agent, Capability
 from src import AgentOptions
@@ -114,6 +114,12 @@ class MarketingAgent(Agent):
             last_message = action.messages[-1].message
             logger.info(f"Processing message: {last_message}")
             response = None
+            
+            # Check if we're running in local mode
+            is_local_mode = os.getenv('OPENAI_API_KEY') and (not os.getenv('OPENSERV_API_KEY') or not action.integrations)
+            
+            if is_local_mode:
+                logger.info("Running in local mode with OpenAI API")
 
             if 'create post' in last_message.lower() or 'social media' in last_message.lower():
                 logger.info("Detected social media post request")
@@ -122,29 +128,43 @@ class MarketingAgent(Agent):
                 topic = last_message.split('about')[-1].strip() if 'about' in last_message else last_message
                 logger.info(f"Extracted platform: {platform}, topic: {topic}")
                 
-                # -------------------------------------------------
-                # LOCAL TESTING APPROACH
-                # -------------------------------------------------
-                # This uses process() to run with your agen locally with the OpenAI API
-                # Great for development and testing without platform dependency
-                # -------------------------------------------------
-                
-                result = await self.process({
-                    'messages': [
-                        {
-                            'role': 'system',
-                            'content': f"You are a marketing expert. Create a compelling social media post for {platform} about {topic}."
-                        },
-                        {
-                            'role': 'user',
-                            'content': f"Create a {platform} post about: {topic}"
-                        }
-                    ]
-                })
-                
-                # Extract the response content
-                if result and 'response' in result:
-                    response = result['response']
+                # Local testing with OpenAI API
+                if is_local_mode:
+                    logger.info("Generating social media post with local OpenAI API")
+                    result = await self.process(ProcessParams(
+                        messages=[
+                            {
+                                'role': 'system',
+                                'content': f"You are a marketing expert. Create a compelling social media post for {platform} about {topic}."
+                            },
+                            {
+                                'role': 'user',
+                                'content': f"Create a {platform} post about: {topic}"
+                            }
+                        ]
+                    ))
+                    
+                    # Extract the response content
+                    if result and 'response' in result:
+                        response = result['response']
+                else:
+                    # Here we would use the Twitter integration through OpenServ
+                    # But for now, still use the local approach
+                    result = await self.process(ProcessParams(
+                        messages=[
+                            {
+                                'role': 'system',
+                                'content': f"You are a marketing expert. Create a compelling social media post for {platform} about {topic}."
+                            },
+                            {
+                                'role': 'user',
+                                'content': f"Create a {platform} post about: {topic}"
+                            }
+                        ]
+                    ))
+                    
+                    if result and 'response' in result:
+                        response = result['response']
             
             elif 'analyze' in last_message.lower() or 'engagement' in last_message.lower():
                 logger.info("Detected engagement analysis request")
@@ -189,8 +209,8 @@ class MarketingAgent(Agent):
                 logger.info(f"Using metrics: {metrics}")
                 
                 # Process locally with OpenAI API
-                result = await self.process({
-                    'messages': [
+                result = await self.process(ProcessParams(
+                    messages=[
                         {
                             'role': 'system',
                             'content': "You are a social media analytics expert. Analyze the engagement metrics and provide actionable recommendations."
@@ -200,7 +220,7 @@ class MarketingAgent(Agent):
                             'content': f"Platform: twitter\nMetrics: {metrics.model_dump_json()}"
                         }
                     ]
-                })
+                ))
                 
                 # Extract response
                 if result and 'response' in result:
@@ -212,15 +232,46 @@ class MarketingAgent(Agent):
                 response = "I'm a marketing agent that can create social media posts and analyze engagement metrics. Try asking me to create a post or analyze engagement!"
 
             logger.info(f"Sending response: {response}")
-            # Send response back to the user using the SDK's method
-            # This uses the send_message convenience method that extracts
-            # workspace_id and agent_id from the current context
-            await self.send_message(response)
+            
+            # Handle sending the message differently depending on mode
+            if is_local_mode:
+                # In local mode, just log the response instead of trying to send it
+                logger.info(f"LOCAL MODE RESPONSE: {response}")
+                print(f"\nAgent response: {response}\n")
+            else:
+                # In platform mode, use the send_message method
+                try:
+                    await self.send_message(response)
+                except Exception as send_error:
+                    logger.error(f"Error sending message: {str(send_error)}")
+                    # Try a backup approach if needed
+                    if hasattr(action, 'workspace') and hasattr(action, 'me'):
+                        try:
+                            await self.send_chat_message(
+                                workspace_id=action.workspace.id,
+                                agent_id=action.me.id,
+                                message=response
+                            )
+                        except Exception as backup_error:
+                            logger.error(f"Backup sending failed: {str(backup_error)}")
 
         except Exception as e:
             logger.error(f"Error in respond_to_chat: {str(e)}", exc_info=True)
             # Send error message to user
-            await self.send_message(f"Sorry, I encountered an error: {str(e)}")
+            try:
+                # Check if we're in local mode
+                is_local_mode = os.getenv('OPENAI_API_KEY') and (not os.getenv('OPENSERV_API_KEY') or not action.integrations)
+                
+                if is_local_mode:
+                    # Just log the error in local mode
+                    error_msg = f"Sorry, I encountered an error: {str(e)}"
+                    logger.error(f"LOCAL MODE ERROR: {error_msg}")
+                    print(f"\nAgent error: {error_msg}\n")
+                else:
+                    # Try to send the error message in platform mode
+                    await self.send_message(f"Sorry, I encountered an error: {str(e)}")
+            except Exception as send_error:
+                logger.error(f"Failed to send error message: {str(send_error)}")
 
 # -------------------------------------------------
 # CREATE_AGENT FUNCTION EXPLAINED
@@ -322,7 +373,19 @@ async def create_social_media_post(params, _):
     """
     try:
         # Extract and validate parameters using Pydantic
-        args = SocialMediaPostParams.model_validate(params)
+        # The params object might have the parameters directly or in an 'args' field
+        if isinstance(params, dict) and 'args' in params:
+            # If params has an 'args' field (common when called from the OpenAI function calling system)
+            # In this case, 'args' might be a JSON string or a dict
+            args_data = params['args']
+            if isinstance(args_data, str):
+                import json
+                args_data = json.loads(args_data)
+            args = SocialMediaPostParams.model_validate(args_data)
+        else:
+            # If params is already the expected structure
+            args = SocialMediaPostParams.model_validate(params)
+            
         platform = args.platform
         topic = args.topic
         
@@ -378,8 +441,18 @@ async def analyze_engagement(params, _):
     - This directly generates the analysis using the OpenAI API
     """
     try:
-        # Extract and validate parameters
-        args = AnalyzeEngagementParams.model_validate(params)
+        # Extract and validate parameters, handling different parameter formats
+        if isinstance(params, dict) and 'args' in params:
+            # If params has an 'args' field
+            args_data = params['args']
+            if isinstance(args_data, str):
+                import json
+                args_data = json.loads(args_data)
+            args = AnalyzeEngagementParams.model_validate(args_data)
+        else:
+            # If params is already the expected structure
+            args = AnalyzeEngagementParams.model_validate(params)
+            
         logger.info(f"Processing engagement analysis for platform: {args.platform}")
         
         # For local testing with OpenAI
