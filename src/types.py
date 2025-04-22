@@ -105,6 +105,17 @@ class RespondChatMessageAction(AgentAction):
 
 class ProcessParams(BaseModel):
     messages: List[Dict[str, str]]
+    
+    # Support for dict input (for compatibility with TypeScript SDK)
+    @classmethod
+    def __get_validators__(cls):
+        yield cls.validate
+
+    @classmethod
+    def validate(cls, v):
+        if isinstance(v, dict):
+            return cls(**v)
+        return v
 
 class AgentOptions(BaseModel):
     system_prompt: str
