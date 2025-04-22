@@ -115,18 +115,9 @@ class MarketingAgent(Agent):
             logger.info(f"Processing message: {last_message}")
             response = None
 
-            # -------------------------------------------------
-            # MESSAGE PROCESSING LOGIC
-            # -------------------------------------------------
-            # This section demonstrates two approaches:
-            # 1. Local processing with OpenAI API (great for development)
-            # 2. Using integrations through OpenServ (for production)
-            # -------------------------------------------------
-
             if 'create post' in last_message.lower() or 'social media' in last_message.lower():
                 logger.info("Detected social media post request")
                 
-                # Simple NLP to extract details from the message
                 platform = 'twitter'  # Default platform
                 topic = last_message.split('about')[-1].strip() if 'about' in last_message else last_message
                 logger.info(f"Extracted platform: {platform}, topic: {topic}")
@@ -134,7 +125,7 @@ class MarketingAgent(Agent):
                 # -------------------------------------------------
                 # LOCAL TESTING APPROACH
                 # -------------------------------------------------
-                # This uses process() to run with the OpenAI API directly
+                # This uses process() to run with your agen locally with the OpenAI API
                 # Great for development and testing without platform dependency
                 # -------------------------------------------------
                 
@@ -154,39 +145,47 @@ class MarketingAgent(Agent):
                 # Extract the response content
                 if result and 'response' in result:
                     response = result['response']
-                    
-                # -------------------------------------------------
-                # TWITTER INTEGRATION APPROACH
-                # -------------------------------------------------
-                # In a production environment, you would use the Twitter
-                # integration provided by OpenServ to post directly to Twitter.
-                # 
-                # Example (uncomment to use):
-                # if any(i.provider == "twitter" for i in action.integrations):
-                #     # Create post content using the response
-                #     tweet_content = response
-                #     # Call the Twitter integration to post the tweet
-                #     tweet_result = await self.call_integration({
-                #         "workspace_id": action.workspace.id,
-                #         "integration_id": "twitter-v2",
-                #         "details": {
-                #             "endpoint": "/2/tweets",
-                #             "method": "POST",
-                #             "data": {
-                #                 "text": tweet_content
-                #             }
-                #         }
-                #     })
-                #     # Add the tweet info to the response
-                #     response += f"\n\nPost has been published to Twitter!"
-                # -------------------------------------------------
             
             elif 'analyze' in last_message.lower() or 'engagement' in last_message.lower():
                 logger.info("Detected engagement analysis request")
                 
-                # Example metrics - in real usage, these would be extracted from the message
-                # or retrieved from the Twitter API using the integration
-                metrics = EngagementMetrics(likes=100, shares=50, comments=30, impressions=1000)
+                # Extract metrics from the message if provided
+                likes = None
+                shares = None
+                comments = None
+                impressions = None
+                
+                # Try to parse metrics from the message
+                import re
+                likes_match = re.search(r'(\d+)\s*likes', last_message, re.IGNORECASE)
+                shares_match = re.search(r'(\d+)\s*shares', last_message, re.IGNORECASE)
+                comments_match = re.search(r'(\d+)\s*comments', last_message, re.IGNORECASE)
+                impressions_match = re.search(r'(\d+)\s*impressions', last_message, re.IGNORECASE)
+                
+                # Get values if they exist in the message
+                if likes_match:
+                    likes = int(likes_match.group(1))
+                if shares_match:
+                    shares = int(shares_match.group(1))
+                if comments_match:
+                    comments = int(comments_match.group(1))
+                if impressions_match:
+                    impressions = int(impressions_match.group(1))
+                
+                # Use random values for any missing metrics
+                import random
+                likes = likes if likes is not None else random.randint(10, 1000)
+                shares = shares if shares is not None else random.randint(5, 500)
+                comments = comments if comments is not None else random.randint(1, 200)
+                impressions = impressions if impressions is not None else random.randint(100, 10000)
+                
+                # Create metrics object with extracted or random values
+                metrics = EngagementMetrics(
+                    likes=likes, 
+                    shares=shares, 
+                    comments=comments, 
+                    impressions=impressions
+                )
                 logger.info(f"Using metrics: {metrics}")
                 
                 # Process locally with OpenAI API
@@ -206,26 +205,6 @@ class MarketingAgent(Agent):
                 # Extract response
                 if result and 'response' in result:
                     response = result['response']
-                    
-                # -------------------------------------------------
-                # TWITTER METRICS INTEGRATION
-                # -------------------------------------------------
-                # For real production use, you would retrieve actual metrics:
-                # 
-                # Example (uncomment to use):
-                # if any(i.provider == "twitter" for i in action.integrations):
-                #     # Get tweet metrics from Twitter API
-                #     twitter_metrics = await self.call_integration({
-                #         "workspace_id": action.workspace.id,
-                #         "integration_id": "twitter-v2",
-                #         "details": {
-                #             "endpoint": "/2/tweets/{id}/metrics",
-                #             "method": "GET",
-                #             "params": {"id": "tweet_id_here"}
-                #         }
-                #     })
-                #     # Process the real metrics...
-                # -------------------------------------------------
 
             # Default response if no command is detected
             if not response:
@@ -244,10 +223,22 @@ class MarketingAgent(Agent):
             await self.send_message(f"Sorry, I encountered an error: {str(e)}")
 
 # -------------------------------------------------
-# AGENT FACTORY FUNCTION
+# CREATE_AGENT FUNCTION EXPLAINED
 # -------------------------------------------------
-# This pattern separates agent creation from execution,
-# making it easier to test and configure.
+# The create_agent() function below:
+# 
+# 1. Creates a new MarketingAgent instance with:
+#    - The system prompt loaded from system.md
+#    - The OpenServ API key for platform communication
+#    - The OpenAI API key for local testing
+#    - The specified model (gpt-4o)
+#
+# 2. Registers two capabilities:
+#    - createSocialMediaPost: For generating platform-specific posts
+#    - analyzeEngagement: For analyzing social media metrics
+#
+# This factory pattern makes testing easier by separating
+# object creation from business logic.
 # -------------------------------------------------
 
 def create_agent() -> MarketingAgent:
@@ -364,8 +355,6 @@ Only generate post for the given platform. Don't generate posts for other platfo
             )
             return completion.choices[0].message.content
         
-        # In production, this would be handled by the OpenServ platform
-        # and the result would be posted via the Twitter integration
         return f"Created a {platform} post about: {topic}"
 
     except Exception as e:
@@ -422,8 +411,6 @@ Provide:
             )
             return completion.choices[0].message.content
         
-        # In production, this would be handled by the OpenServ platform
-        # with real Twitter metrics data
         return f"Analyzed engagement metrics for {args.platform}"
 
     except Exception as e:
