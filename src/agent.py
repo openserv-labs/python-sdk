@@ -549,9 +549,9 @@ class Agent:
                 # Use the process method to handle the chat with tools
                 process_result = await self.process(ProcessParams(messages=messages))
                 
-                if process_result.get("completed", False) and process_result.get("response"):
+                if process_result.get("completed", False) and process_result.get("content"):
                     # Send the final response back to the user
-                    response_message = process_result["response"]
+                    response_message = process_result["content"]
                     logger.info(f"Sending chat response: {response_message[:100]}...")
                     
                     await self.send_chat_message(
@@ -822,3 +822,49 @@ class Agent:
         except Exception as e:
             logger.error(f"Error in send_message: {str(e)}")
             return {"error": str(e), "success": False}
+
+    async def _execute_capability(self, name, params):
+        """Execute a capability if it exists."""
+        try:
+            if name not in self.tools:
+                return {"success": False, "error": f"Capability {name} not found"}
+            
+            capability = next((t for t in self.tools if t.name == name), None)
+            
+            # Validate params against schema if provided
+            if capability.schema:
+                try:
+                    # Handle both Pydantic v1 and v2
+                    if hasattr(capability.schema, 'model_validate'):
+                        # Pydantic v2
+                        validated_args = capability.schema.model_validate(params.get("args", {}))
+                    else:
+                        # Pydantic v1
+                        validated_args = capability.schema(**params.get("args", {}))
+                    
+                    # Update params with validated args
+                    params["args"] = validated_args
+                except Exception as e:
+                    return {"success": False, "error": f"Invalid arguments: {str(e)}"}
+            
+            try:
+                # Execute capability
+                result = await capability.run(params, params.get("messages", []))
+                return {"success": True, "result": result}
+            except TypeError as e:
+                # Handle case where OpenAI Python client returns a non-awaitable
+                if "can't be used in 'await' expression" in str(e):
+                    self.logger.warning(f"Capability {name} returned non-awaitable result, running synchronously")
+                    # Try to run without await since it might be a non-awaitable call
+                    result = capability.run(params, params.get("messages", []))
+                    return {"success": True, "result": result}
+                else:
+                    raise
+            
+        except Exception as e:
+            self.logger.error(f"Error executing capability {name}: {str(e)}")
+            import traceback
+            self.logger.debug(traceback.format_exc())
+            if self.on_error:
+                self.on_error(e, {"capability": name, "params": params})
+            return {"success": False, "error": str(e)}
