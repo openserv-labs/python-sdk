@@ -37,7 +37,7 @@ class AgentServer:
             
             try:
                 body = await request.json()
-                logger.debug("Request body: %s", body)
+                logger.info(f"Root route request received: {body.get('type', 'unknown')}")
                 
                 await self._agent.handle_root_route(body)
                 return {"status": "OK", "message": "Request accepted for processing"}
@@ -56,7 +56,7 @@ class AgentServer:
                 
             try:
                 body = await request.json()
-                logger.debug("Tool request for %s: %s", tool_name, body)
+                logger.info(f"Tool request for {tool_name}")
                 
                 # Ensure body contains necessary parameters
                 if 'args' not in body:
@@ -81,7 +81,7 @@ class AgentServer:
                 
             try:
                 body = await request.json()
-                logger.info(f"Task completion request: {body}")
+                logger.info(f"Task completion request received")
                 
                 workspace_id = body.get('workspace_id')
                 task_id = body.get('task_id')
@@ -93,8 +93,8 @@ class AgentServer:
                         detail="Missing required parameters: workspace_id and task_id"
                     )
                 
-                await self._agent.complete_task(workspace_id, task_id, output)
-                return {"status": "success", "message": f"Task {task_id} marked as complete"}
+                result = await self._agent.complete_task(workspace_id, task_id, output)
+                return {"status": "success", "message": f"Task {task_id} marked as complete", "result": result}
             except Exception as e:
                 logger.exception("Error completing task: %s", str(e))
                 raise HTTPException(

@@ -29,11 +29,13 @@ class BaseClient:
     """Base class for API clients."""
     def __init__(self, config: APIConfig):
         self.config = config
+        # Create client without base_url, will be set by subclasses
         self.client = httpx.AsyncClient(
             headers={
                 'Content-Type': 'application/json',
                 'x-openserv-key': config.api_key
-            }
+            },
+            timeout=30.0  # Set a reasonable default timeout
         )
     
     async def close(self):
@@ -97,6 +99,12 @@ class BaseClient:
             
             logger.info(f"Response status: {response.status_code}")
             logger.debug(f"Response headers: {response.headers}")
+            
+            # Early return for 204 No Content
+            if response.status_code == 204:
+                logger.info("Received 204 No Content response")
+                return {"success": True}
+                
             logger.debug(f"Response content size: {len(response.content)} bytes")
             
             # Log the actual content for debugging, but limit length
@@ -117,15 +125,29 @@ class BaseClient:
                     if isinstance(json_response, dict):
                         logger.debug(f"JSON response keys: {list(json_response.keys())}")
                     return json_response
-                return None
+                return {"success": True}
             elif 'text/html' in content_type or 'text/plain' in content_type:
-                return {'status': response.text}
+                return {'content': response.text, 'success': True}
             else:
                 # Special handling for empty or unspecified content types
                 if path.endswith('/execute') and response.status_code == 200:
                     logger.info("Task execution request successful with status 200")
                     # Return a successful response even if there's no content
                     return {'success': True, 'status': 'Task execution initiated'}
+                
+                # For chat message endpoints that might return no content-type
+                if 'message' in path and response.status_code == 200:
+                    logger.info("Chat message request successful with status 200")
+                    if not response.content:
+                        # Empty response but successful status
+                        return {'success': True}
+                    else:
+                        # Try to parse as JSON if there's content
+                        try:
+                            return response.json()
+                        except json.JSONDecodeError:
+                            # Return text content if not JSON
+                            return {'content': response.text, 'success': True}
                 
                 logger.warning(f"Unhandled content type: {content_type}")
                 # Try to parse as JSON anyway if there's content
@@ -136,8 +158,8 @@ class BaseClient:
                         return json_response
                     except json.JSONDecodeError:
                         logger.warning("Could not parse response as JSON")
-                        return {'raw_content': response.text if response.text else 'Empty response'}
-                return {'status': 'No content'}
+                        return {'content': response.text, 'success': True}
+                return {'success': True}
                 
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 401:
@@ -169,7 +191,9 @@ class OpenServClient(BaseClient):
     """Client for the OpenServ Platform API."""
     def __init__(self, config: APIConfig):
         super().__init__(config)
-        self.client.base_url = config.platform_url
+        # Make sure the base URL doesn't end with a slash
+        self.client.base_url = httpx.URL(config.platform_url.rstrip('/'))
+        logger.info(f"Platform client initialized with base URL: {config.platform_url}")
     
     async def get_files(self, workspace_id: int) -> Dict[str, Any]:
         """Get files from a workspace."""
@@ -212,16 +236,17 @@ class RuntimeClient(BaseClient):
     """Client for the OpenServ Runtime API."""
     def __init__(self, config: APIConfig):
         super().__init__(config)
-        # Ensure runtime_url doesn't end with a slash
-        runtime_url = config.runtime_url.rstrip('/')
-        self.client = httpx.AsyncClient(
-            base_url=f"{runtime_url}/runtime",
-            headers={
-                'Content-Type': 'application/json',
-                'x-openserv-key': config.api_key
-            },
-            timeout=300.0
-        )
+        # Make sure the base URL doesn't end with a slash
+        # and append /runtime to match TypeScript SDK
+        self.client.base_url = httpx.URL(f"{config.runtime_url.rstrip('/')}/runtime")
+        
+        # Log base URL for debugging
+        logger.info(f"Runtime client initialized with base URL: {self.client.base_url}")
+        if config.api_key and len(config.api_key) > 8:
+            masked_key = f"{config.api_key[:4]}...{config.api_key[-4:]}"
+            logger.info(f"Using API key starting with: {masked_key}")
+        else:
+            logger.warning("API key is missing or too short")
     
     async def execute_task(
         self,
@@ -231,53 +256,46 @@ class RuntimeClient(BaseClient):
         messages: List[Dict[str, Any]],
         action: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Execute a task through the runtime."""
-        logger = logging.getLogger(__name__)
-        
-        # Log detailed info about the request
+        """Execute a task on the runtime."""
         logger.info(f"Executing task {task_id} for workspace {workspace_id}")
-        logger.info(f"Tools provided: {', '.join(t.get('name', 'unknown') for t in tools)}")
+        logger.info(f"Tools provided: {', '.join([t.get('name', 'unknown') for t in tools])}")
         logger.info(f"Number of messages: {len(messages)}")
         
-        # Create the request payload
-        json_data = {
-            'workspace_id': workspace_id,
-            'task_id': task_id,
+        # Construct the payload in the format expected by the runtime
+        # Match exactly the TypeScript SDK payload format
+        payload = {
             'tools': tools,
             'messages': messages,
             'action': action,
-            'auto_complete': True  # Signal to platform to automatically complete the task when processed
+            'workspace_id': workspace_id,
+            'task_id': task_id
         }
         
-        # Execute the request
+        # Log request details at debug level
+        logger.debug(f"Execute task payload: {json.dumps(payload, cls=DateTimeEncoder)}")
+        
         try:
-            response = await self._request(
-                'POST',
-                '/execute',
-                json_data=json_data
-            )
-            
-            # Special handling for task execution responses
-            if response:
-                if isinstance(response, dict):
-                    logger.info(f"Task execution response received: {list(response.keys())}")
-                    if 'success' in response and response['success']:
-                        logger.info(f"Task {task_id} successfully initiated")
-                else:
-                    logger.info(f"Task execution response type: {type(response)}")
-            else:
-                # If no response data, still consider the task successful if no exception was raised
-                logger.info("No detailed response data received but execution request was successful")
-                response = {'success': True, 'status': 'Task execution successfully initiated'}
-            
-            return response
-        except Exception as error:
-            logger.error(f"Task execution error: {str(error)}", exc_info=True)
-            # Return a response indicating failure
-            return {
-                'success': False,
-                'error': str(error)
+            # Note: Path is now just /execute since /runtime is part of the base URL
+            response = await self.post('/execute', json_data=payload)
+            logger.info(f"Task execution successful for task {task_id}")
+            return {'success': True, 'data': response}
+        except AuthenticationError as auth_err:
+            # Handle authentication errors specifically
+            logger.error(f"Authentication error: {str(auth_err)}")
+            return {'success': False, 'error': str(auth_err)}
+        except APIError as api_err:
+            # Handle API errors with more detail
+            logger.error(f"API error executing task: {str(api_err)}")
+            error_detail = {
+                'message': str(api_err),
+                'status_code': getattr(api_err, 'status_code', None),
+                'response': getattr(api_err, 'response', None)
             }
+            return {'success': False, 'error': error_detail}
+        except Exception as e:
+            # Handle other unexpected errors
+            logger.exception(f"Unexpected error executing task: {str(e)}")
+            return {'success': False, 'error': str(e)}
     
     async def handle_chat(
         self,
@@ -287,17 +305,44 @@ class RuntimeClient(BaseClient):
         single_use: bool = False
     ) -> Optional[Dict[str, Any]]:
         """Handle a chat request."""
-        json_data = {
+        # Format the payload consistently with execute_task
+        payload = {
             "tools": tools,
             "messages": messages,
-            "action": action,
+            "action": action
         }
         
         if single_use:
-            json_data["single_use"] = True
+            payload["single_use"] = True
+        
+        logger.info(f"Sending chat request with {len(messages)} messages and {len(tools)} tools")
+        logger.debug(f"Chat request payload: {json.dumps(payload, cls=DateTimeEncoder)}")
+        
+        try:
+            # Note: Path is now just /chat since /runtime is part of the base URL
+            response = await self.post('/chat', json_data=payload)
+            logger.info("Chat request successful")
             
-        return await self._request(
-            "POST",
-            "/chat",
-            json_data=json_data,
-        ) 
+            # Check if we have a response - this is optional since the runtime might handle sending the response directly
+            if response:
+                logger.debug(f"Chat response data: {response}")
+                return {'success': True, 'data': response}
+            else:
+                # This is still a success case, just no response data
+                return {'success': True}
+        except AuthenticationError as auth_err:
+            # Handle authentication errors specifically
+            logger.error(f"Authentication error in chat request: {str(auth_err)}")
+            return {'success': False, 'error': str(auth_err)}
+        except APIError as api_err:
+            # Handle API errors with more detail
+            logger.error(f"API error in chat request: {str(api_err)}")
+            error_detail = {
+                'message': str(api_err),
+                'status_code': getattr(api_err, 'status_code', None),
+                'response': getattr(api_err, 'response', None)
+            }
+            return {'success': False, 'error': error_detail}
+        except Exception as e:
+            logger.exception(f"Chat request failed: {str(e)}")
+            return {'success': False, 'error': str(e)} 
