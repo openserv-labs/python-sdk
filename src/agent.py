@@ -73,8 +73,12 @@ class Agent:
             self.config.openai.model = options.model
             logger.info(f"Using custom OpenAI model: {options.model}")
             
-        # Validate configuration
-        self.config.validate_api_key()
+        # Validate configuration - fail early
+        if not self.config.api.api_key:
+            api_key_error = ConfigurationError('OpenServ API key is required')
+            if options.on_error:
+                options.on_error(api_key_error, {"context": "Missing API key during initialization"})
+            raise api_key_error
         
         # Initialize components
         self.tools: List[Capability[BaseModel]] = []
@@ -85,7 +89,7 @@ class Agent:
         # Store error handler if provided
         self.on_error = options.on_error
         
-        # Set up server
+        # Set up server with common security and performance features
         self.server = AgentServer(self.config.server)
         self.server.set_agent(self)
         
@@ -132,6 +136,7 @@ class Agent:
             max_iterations = int(os.environ.get("OPENSERV_TOOL_LOOP_LIMIT", "10"))
             iteration_count = 0
             final_response = None
+            tool_outputs = []
 
             while iteration_count < max_iterations:
                 logger.info("Process iteration %d/%d", iteration_count + 1, max_iterations)
@@ -157,9 +162,15 @@ class Agent:
                     if self.tools:
                         completion_args['tools'] = self.openai_tools
                         
+                    # Add tool_outputs if there are any
+                    if tool_outputs:
+                        completion_args['tool_choice'] = 'auto'
+                        
                     completion = self.openai_client.chat.completions.create(**completion_args)
                 except Exception as e:
                     logger.error(f"OpenAI API error: {str(e)}")
+                    if self.on_error:
+                        self.on_error(e, {"context": "OpenAI API call failure in process method"})
                     return {
                         "error": str(e),
                         "messages": current_messages,
@@ -167,7 +178,10 @@ class Agent:
                     }
 
                 if not completion.choices or not completion.choices[0].message:
-                    raise RuntimeError('No response from OpenAI')
+                    error = RuntimeError('No response from OpenAI')
+                    if self.on_error:
+                        self.on_error(error, {"context": "Empty response from OpenAI"})
+                    raise error
 
                 last_message = completion.choices[0].message
                 
@@ -193,80 +207,90 @@ class Agent:
                 logger.info(f"OpenAI requested {len(last_message.tool_calls)} tool calls")
                 
                 # Process all tool calls in the response
+                tool_outputs = []
                 for tool_call in last_message.tool_calls:
                     if not tool_call.function or not tool_call.function.name:
                         logger.warning("Tool call missing function name")
                         continue
 
-                    name = tool_call.function.name
-                    args_json = tool_call.function.arguments
-                    logger.info(f"Executing tool '{name}' with args: {args_json}")
-
+                    tool_name = tool_call.function.name
+                    function_args = tool_call.function.arguments
+                    tool_call_id = tool_call.id
+                    
+                    logger.info(f"Processing tool call: {tool_name}")
+                    
+                    # Find the corresponding tool
+                    tool = next((t for t in self.tools if t.name == tool_name), None)
+                    if not tool:
+                        error_msg = f"Tool not found: {tool_name}"
+                        logger.warning(error_msg)
+                        tool_outputs.append({
+                            "tool_call_id": tool_call_id,
+                            "role": "tool",
+                            "content": f"Error: {error_msg}",
+                        })
+                        continue
+                    
+                    # Parse tool arguments
                     try:
-                        # Find the matching tool
-                        tool = next((t for t in self.tools if t.name == name), None)
-                        if not tool:
-                            error_msg = f"Tool '{name}' not found"
-                            logger.warning(error_msg)
-                            # Add tool result with error
-                            current_messages.append({
-                                'role': 'tool',
-                                'content': json.dumps({"error": error_msg}),
-                                'tool_call_id': tool_call.id
-                            })
-                            continue
-                        
-                        # Parse arguments based on the tool's schema
-                        try:
-                            # Parse JSON args
-                            args_dict = json.loads(args_json)
-                            # Create validated args with the schema
-                            args = tool.schema(**args_dict)
-                        except Exception as parse_error:
-                            logger.error(f"Error parsing tool arguments: {str(parse_error)}")
-                            # Add tool result with error
-                            current_messages.append({
-                                'role': 'tool',
-                                'content': json.dumps({"error": f"Invalid arguments: {str(parse_error)}"}),
-                                'tool_call_id': tool_call.id
-                            })
-                            continue
-                        
-                        # Run the tool with parsed args - create consistent params structure
-                        run_params = {"args": args}
-                        result = await tool.run(run_params, current_messages)
-                        logger.info(f"Tool '{name}' execution result: {result}")
-                        
-                        # Add tool result to conversation - format to match TypeScript SDK
-                        current_messages.append({
-                            'role': 'tool',
-                            'content': str(result),
-                            'tool_call_id': tool_call.id
+                        if isinstance(function_args, str):
+                            try:
+                                args = json.loads(function_args)
+                            except json.JSONDecodeError:
+                                args = function_args
+                        else:
+                            args = function_args
+                            
+                        logger.info(f"Tool arguments: {args}")
+                    except Exception as e:
+                        error_msg = f"Failed to parse tool arguments: {str(e)}"
+                        logger.error(error_msg)
+                        tool_outputs.append({
+                            "tool_call_id": tool_call_id,
+                            "role": "tool",
+                            "content": f"Error: {error_msg}",
                         })
-                    except Exception as error:
-                        logger.error(f"Tool execution failed: {str(error)}", exc_info=True)
-                        # Add tool result with error - format consistently
-                        current_messages.append({
-                            'role': 'tool',
-                            'content': json.dumps({"error": str(error)}),
-                            'tool_call_id': tool_call.id
+                        continue
+                    
+                    # Execute the tool
+                    try:
+                        result = await tool.run({"args": args}, current_messages)
+                        logger.info(f"Tool result: {result[:100]}...")
+                        
+                        tool_outputs.append({
+                            "tool_call_id": tool_call_id,
+                            "role": "tool",
+                            "content": result,
                         })
-
-            # Return the final processed conversation
-            if iteration_count >= max_iterations:
-                logger.warning(f"Reached maximum iterations ({max_iterations})")
+                    except Exception as e:
+                        error_msg = f"Error executing tool: {str(e)}"
+                        logger.error(error_msg)
+                        if self.on_error:
+                            self.on_error(e, {"context": f"Tool execution failure: {tool_name}"})
+                        tool_outputs.append({
+                            "tool_call_id": tool_call_id,
+                            "role": "tool",
+                            "content": f"Error: {error_msg}",
+                        })
                 
-            # Return the result in a format consistent with TypeScript SDK
+                # Add tool responses to messages
+                for tool_output in tool_outputs:
+                    current_messages.append(tool_output)
+            
+            # Check if we exited the loop due to max iterations
+            if iteration_count >= max_iterations and not final_response:
+                logger.warning(f"Reached maximum iterations ({max_iterations}) without a final response")
+                final_response = "Maximum number of tool calls reached without a conclusion. Please try again with a simpler request."
+            
             return {
-                "response": final_response,
                 "messages": current_messages,
-                "completed": final_response is not None,
-                "iterations": iteration_count,
-                # Only include model dump if we have a completion
-                "model_dump": completion.model_dump() if 'completion' in locals() else None
+                "content": final_response,
+                "completed": True
             }
         except Exception as e:
-            logger.exception(f"Process error: {str(e)}")
+            logger.exception("Error in process method")
+            if self.on_error:
+                self.on_error(e, {"context": "Process method failure"})
             return {
                 "error": str(e),
                 "messages": params.messages,
@@ -382,20 +406,46 @@ class Agent:
             return {'error': str(error)}
 
     def start(self) -> None:
-        """Start the agent's HTTP server with signal handling."""
-        loop = asyncio.get_event_loop()
+        """
+        Start the server and set up signal handlers.
+        This method is the main entry point for running an agent.
         
-        def handle_signal(sig: int) -> None:
-            sig_name = signal.Signals(sig).name
-            logger.info("Received %s. Starting graceful shutdown...", sig_name)
-            # Schedule the shutdown coroutine
-            loop.create_task(self.stop())
+        Returns:
+            None
+        """
+        logger.info("Starting agent")
         
-        # Set up signal handlers
-        for sig in (signal.SIGTERM, signal.SIGINT):
-            loop.add_signal_handler(sig, lambda s=sig: handle_signal(s))
+        # Set up signal handlers for graceful shutdown
+        def handle_signal(sig: int, frame) -> None:
+            logger.info(f"Received signal {sig}, shutting down")
             
-        self.server.start()
+            # Create event loop for shutdown if not already in one
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # Schedule shutdown in the current loop
+                    loop.create_task(self.stop())
+                else:
+                    # Create a new loop for shutdown
+                    asyncio.run(self.stop())
+            except Exception as e:
+                logger.error(f"Error during shutdown: {str(e)}")
+                # Force exit if graceful shutdown fails
+                import sys
+                sys.exit(1)
+        
+        # Register signal handlers
+        signal.signal(signal.SIGINT, handle_signal)
+        signal.signal(signal.SIGTERM, handle_signal)
+        
+        try:
+            # Start the server - this is a blocking call
+            self.server.start()
+        except Exception as e:
+            logger.error(f"Error starting server: {str(e)}")
+            if self.on_error:
+                self.on_error(e, {"context": "Server startup failure"})
+            raise
 
     async def stop(self) -> None:
         """Stop the agent and clean up resources."""
