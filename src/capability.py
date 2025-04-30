@@ -3,6 +3,7 @@ from pydantic import BaseModel
 import inspect
 import json
 import logging
+from enum import Enum
 from .types import AgentAction, ChatMessage
 
 logger = logging.getLogger(__name__)
@@ -93,6 +94,29 @@ class Capability(Generic[T]):
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse JSON arguments: {e}")
                     return f"Error: Invalid JSON arguments: {str(e)}"
+            
+            # Pre-process args for case-insensitive enum values
+            if isinstance(args, dict):
+                # Case-insensitive handling for common enum fields
+                # This makes the Python SDK more forgiving like the TypeScript SDK
+                case_insensitive_fields = ['platform', 'type', 'status', 'role']
+                processed_args = {}
+                
+                for key, value in args.items():
+                    if key in case_insensitive_fields and isinstance(value, str):
+                        # Check if this is a potentially case-sensitive enum field
+                        processed_args[key] = value.lower()
+                    else:
+                        processed_args[key] = value
+                        
+                # Handle nested structures (primarily for metrics, etc.)
+                for key, value in processed_args.items():
+                    if isinstance(value, dict):
+                        for nested_key, nested_value in value.items():
+                            if nested_key in case_insensitive_fields and isinstance(nested_value, str):
+                                processed_args[key][nested_key] = nested_value.lower()
+                
+                args = processed_args
             
             # If args is already a Pydantic model instance of the right type, use it directly
             if isinstance(args, self.schema):
