@@ -87,7 +87,7 @@ This is the most basic example for you to understand how our sdk works.
 
 1. Navigate to the examples directory and Run the marketing agent:
 ```bash
-python3 examples/basic_example.py
+python3 examples/basic_agent.py
 ```
 
 2. Create a new project at OpenServ, choose your agent and add the following project prompt:
