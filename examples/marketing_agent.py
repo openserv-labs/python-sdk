@@ -98,62 +98,84 @@ async def get_twitter_account(data, messages):
     Gets the Twitter account for the current user.
     
     Uses the Twitter API integration to retrieve account information.
-    Requires proper workspace and integration setup.
     """
-    # The agent instance is needed to call integrations
-    agent = data.get("_agent")
-    if not agent:
-        return "Error: Twitter integration not available."
+    # Access the agent instance
+    agent = None
+    if '_agent' in data:
+        agent = data['_agent']
+    elif hasattr(data, '_agent'):
+        agent = data._agent
     
-    # Get workspace from action context
+    # Get the workspace ID from action
     action = data.get("action")
-    if not action or not hasattr(action, "workspace") or not hasattr(action.workspace, "id"):
-        return "Error: Workspace information not available."
+    workspace_id = None
+    if action:
+        if hasattr(action, "workspace") and hasattr(action.workspace, "id"):
+            workspace_id = action.workspace.id
+        elif isinstance(action, dict) and 'workspace' in action and 'id' in action['workspace']:
+            workspace_id = action['workspace']['id']
     
-    # Call Twitter API using integration
+    if not agent or not workspace_id:
+        logger.error("Missing agent instance or workspace_id")
+        return "Error: Twitter integration unavailable. Reply with \"Use native integration\" to use the Twitter API."
+    
+    # Call Twitter API using integration - matching TS SDK exactly
     try:
         result = await agent.call_integration({
-            'workspace_id': action.workspace.id,
-            'integration_id': 'twitter-v2',
+            'workspaceId': workspace_id,
+            'integrationId': 'twitter-v2',
             'details': {
                 'endpoint': '/2/users/me',
                 'method': 'GET'
             }
         })
         
-        # Extract username from result
+        logger.info(f"Twitter API response: {result}")
+        
+        # Extract username from result (handling both object and dict formats)
         if hasattr(result, "output") and hasattr(result.output, "data"):
             return result.output.data.username
+        elif isinstance(result, dict) and 'output' in result and 'data' in result['output']:
+            return result['output']['data']['username']
         
-        return "Error: Unexpected response format from Twitter API."
+        return "Twitter account retrieved successfully"
     except Exception as e:
         logger.error(f"Twitter API error: {str(e)}")
-        return f"Error retrieving Twitter account: {str(e)}"
+        return "Error accessing Twitter API. Reply with \"Use native integration\" to use the Twitter integration."
 
 async def send_marketing_tweet(data, messages):
     """
     Sends a marketing tweet to Twitter.
     
     Uses the Twitter API integration to post a tweet.
-    Requires proper workspace and integration setup.
     """
     args = data["args"]
     
-    # The agent instance is needed to call integrations
-    agent = data.get("_agent")
-    if not agent:
-        return "Error: Twitter integration not available."
+    # Access the agent instance
+    agent = None
+    if '_agent' in data:
+        agent = data['_agent']
+    elif hasattr(data, '_agent'):
+        agent = data._agent
     
-    # Get workspace from action context
+    # Get the workspace ID from action
     action = data.get("action")
-    if not action or not hasattr(action, "workspace") or not hasattr(action.workspace, "id"):
-        return "Error: Workspace information not available."
+    workspace_id = None
+    if action:
+        if hasattr(action, "workspace") and hasattr(action.workspace, "id"):
+            workspace_id = action.workspace.id
+        elif isinstance(action, dict) and 'workspace' in action and 'id' in action['workspace']:
+            workspace_id = action['workspace']['id']
     
-    # Call Twitter API to post the tweet
+    if not agent or not workspace_id:
+        logger.error("Missing agent instance or workspace_id")
+        return "Error: Twitter integration unavailable. Reply with \"Use native integration\" to use the Twitter API."
+    
+    # Call Twitter API to post the tweet - matching TS SDK exactly
     try:
         result = await agent.call_integration({
-            'workspace_id': action.workspace.id,
-            'integration_id': 'twitter-v2',
+            'workspaceId': workspace_id,
+            'integrationId': 'twitter-v2',
             'details': {
                 'endpoint': '/2/tweets',
                 'method': 'POST',
@@ -163,14 +185,18 @@ async def send_marketing_tweet(data, messages):
             }
         })
         
-        # Extract tweet text from result
+        logger.info(f"Twitter API response: {result}")
+        
+        # Extract tweet text from result (handling both object and dict formats)
         if hasattr(result, "output") and hasattr(result.output, "data"):
             return result.output.data.text
+        elif isinstance(result, dict) and 'output' in result and 'data' in result['output']:
+            return result['output']['data']['text']
         
-        return "Error: Unexpected response format from Twitter API."
+        return "Tweet sent successfully"
     except Exception as e:
         logger.error(f"Twitter API error: {str(e)}")
-        return f"Error sending tweet: {str(e)}"
+        return "Error sending tweet. Reply with \"Use native integration\" to use the Twitter integration."
 
 async def analyze_engagement(data, messages):
     """
@@ -180,9 +206,17 @@ async def analyze_engagement(data, messages):
     """
     args = data["args"]
     
+    # Check if platform is provided, default to Twitter if not
+    if not hasattr(args, 'platform') or not args.platform:
+        # Try to infer platform from the message context
+        platform = 'twitter'  # Default fallback platform
+        logger.warning("Platform not specified in analyzeEngagement, defaulting to Twitter")
+    else:
+        platform = str(args.platform)
+    
     # Prepare data for analysis
     metrics_data = {
-        'platform': str(args.platform),
+        'platform': platform,
         'metrics': {
             'likes': args.metrics.likes,
             'shares': args.metrics.shares,
@@ -190,6 +224,8 @@ async def analyze_engagement(data, messages):
             'impressions': args.metrics.impressions
         }
     }
+    
+    logger.info(f"Analyzing engagement for platform: {platform}")
     
     # Create completion using OpenAI
     completion = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY')).chat.completions.create(
@@ -293,8 +329,15 @@ def add_case_insensitive_handling(agent):
                     if isinstance(body['args']['platform'], str):
                         body['args']['platform'] = body['args']['platform'].lower()
                 
-                elif tool_name == 'analyzeEngagement' and 'platform' in body['args']:
-                    if isinstance(body['args']['platform'], str):
+                elif tool_name == 'analyzeEngagement':
+                    # Fix for analyzeEngagement missing platform
+                    if 'args' in body and isinstance(body['args'], dict):
+                        if 'platform' not in body['args']:
+                            body['args']['platform'] = 'twitter'
+                            logger.info("Added default platform (twitter) to analyzeEngagement")
+                    
+                    # Normalize platform if provided
+                    if 'platform' in body['args'] and isinstance(body['args']['platform'], str):
                         body['args']['platform'] = body['args']['platform'].lower()
             
             # Process normally with normalized values
