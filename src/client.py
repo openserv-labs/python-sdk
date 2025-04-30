@@ -271,8 +271,10 @@ class RuntimeClient(BaseClient):
             'task_id': task_id
         }
         
-        # Log request details at debug level
-        logger.debug(f"Execute task payload: {json.dumps(payload, cls=DateTimeEncoder)}")
+        # Log a sample of the payload for debugging
+        logger.debug(f"Execute task payload sample: tools={len(tools)}, messages={len(messages)}")
+        if messages and len(messages) > 0:
+            logger.debug(f"First message role: {messages[0].get('role', 'unknown')}")
         
         try:
             # Note: Path is now just /execute since /runtime is part of the base URL
@@ -316,7 +318,16 @@ class RuntimeClient(BaseClient):
             payload["single_use"] = True
         
         logger.info(f"Sending chat request with {len(messages)} messages and {len(tools)} tools")
-        logger.debug(f"Chat request payload: {json.dumps(payload, cls=DateTimeEncoder)}")
+        
+        # Print a sample of the tools for debugging
+        tool_names = [t.get('name', 'unknown') for t in tools]
+        logger.info(f"Tools in payload: {tool_names}")
+        
+        # Print a sample of the messages for debugging
+        if messages and len(messages) > 0:
+            logger.debug(f"First message role: {messages[0].get('role', 'unknown')}")
+            if len(messages) > 1:
+                logger.debug(f"Most recent message role: {messages[-1].get('role', 'unknown')}")
         
         try:
             # Note: Path is now just /chat since /runtime is part of the base URL
