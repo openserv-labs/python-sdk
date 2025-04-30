@@ -105,7 +105,7 @@ python3 examples/marketing_agent.py
 
 2. Create a new project at OpenServ, choose your agent and add the following project prompt. When creating the agent, add Twitter integration to your agent. 
 ```
-Create a social media post for Twitter about the launch of our new AI-powered productivity tool. Then analyze the engagement metrics with 10 likes, 20 shares, 5 comments, and 100 impressions.
+First, get my Twitter account information. Then create a compelling tweet about our new AI-driven marketing automation platform that increases engagement by 45%. After that, send this tweet to my Twitter account. Finally, analyze these engagement metrics: 25 likes, 12 shares, 8 comments, and 400 impressions to provide recommendations for improving future performance.
 ```
 
 ### Custom Agent Example
