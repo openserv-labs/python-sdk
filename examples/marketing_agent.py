@@ -1,7 +1,7 @@
 """
-Marketing agent for OpenServ Python SDK.
+📚 Marketing Agent Example for OpenServ Python SDK 📚
 
-Demonstrates a marketing agent with social media capabilities.
+Demonstrates a marketing agent with social media capabilities, including Twitter native integration.
 """
 
 import os
@@ -16,71 +16,63 @@ from typing import Dict, Any, List, Optional
 
 from src import Agent, Capability, AgentOptions
 
-# Load environment variables
+# Load environment variables from .env file
 load_dotenv()
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
-
-# Verify API key
-if not os.getenv('OPENAI_API_KEY'):
-    raise ValueError('OPENAI_API_KEY environment variable is required')
-
-# Add information about platform requirements
-logger.info('Marketing agent initialized with Twitter capabilities')
-logger.info('Twitter capabilities require integration with the OpenServ platform')
-logger.info('These capabilities will not work in a local development environment')
-
-# Initialize OpenAI client
-openai_client = openai.OpenAI(
-    api_key=os.getenv('OPENAI_API_KEY')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+logger = logging.getLogger(__name__)
 
 # Define models for capabilities
 class SocialMediaPlatform(str, Enum):
+    """Supported social media platforms."""
     TWITTER = 'twitter'
     LINKEDIN = 'linkedin'
     FACEBOOK = 'facebook'
 
 class SocialMediaPostParams(BaseModel):
+    """Parameters for creating a social media post."""
     platform: SocialMediaPlatform
     topic: str
 
 class GetTwitterAccountParams(BaseModel):
+    """Parameters for getting Twitter account info (empty schema)."""
     pass
 
 class SendMarketingTweetParams(BaseModel):
+    """Parameters for sending a marketing tweet."""
     tweetText: str
 
 class EngagementMetrics(BaseModel):
+    """Social media engagement metrics structure."""
     likes: int
     shares: int
     comments: int
     impressions: int
 
 class AnalyzeEngagementParams(BaseModel):
+    """Parameters for analyzing social media engagement."""
     platform: SocialMediaPlatform
     metrics: EngagementMetrics
 
 # Define capability functions
 async def create_social_media_post(data, messages):
-    """Creates a social media post for the specified platform."""
+    """
+    Creates a social media post for the specified platform.
+    """
     args = data["args"]
+    platform = str(args.platform)
     
-    # Debug logs for platform
-    logger.info(f"Creating post for platform: {args.platform} (type: {type(args.platform)})")
-    
-    # Get platform value but don't force it to a specific value
-    platform_str = str(args.platform)
-    
-    # Create completion using the same prompt as TS version
-    completion = openai_client.chat.completions.create(
+    # Create completion using OpenAI
+    completion = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY')).chat.completions.create(
         model='gpt-4o',
         messages=[
             {
                 'role': 'system',
-                'content': f"""You are a marketing expert. Create a compelling {platform_str} post about: {args.topic}
+                'content': f"""You are a marketing expert. Create a compelling {platform} post about: {args.topic}
 
 Follow these platform-specific guidelines:
 - Twitter: Max 280 characters, casual tone, use hashtags
@@ -99,81 +91,29 @@ Only generate post for the given platform. Don't generate posts for other platfo
         ]
     )
 
-    generated_post = completion.choices[0].message.content
-    logger.info(f"Generated {platform_str} post: {generated_post}")
-    
-    return generated_post
+    return completion.choices[0].message.content
 
 async def get_twitter_account(data, messages):
-    """Gets the Twitter account for the current user."""
-    # Debug the structure of the input data
-    logger.info(f"get_twitter_account received data keys: {list(data.keys() if isinstance(data, dict) else [])}")
+    """
+    Gets the Twitter account for the current user.
     
-    # Get workspace ID from action or try various fallbacks to ensure it works
-    workspace_id = None
-    action = data.get("action")
-    
-    # Debug action object if available
-    if action:
-        logger.info(f"Action type: {type(action)}")
-        logger.info(f"Action has workspace attr: {hasattr(action, 'workspace')}")
-        if hasattr(action, "workspace"):
-            logger.info(f"Workspace has id attr: {hasattr(action.workspace, 'id')}")
-    
-    # Method 1: Try to get from action.workspace.id (as object attributes)
-    if action and hasattr(action, "workspace") and hasattr(action.workspace, "id"):
-        workspace_id = action.workspace.id
-        logger.info(f"Found workspace_id via object attributes: {workspace_id}")
-    
-    # Method 2: Try to get from action['workspace']['id'] (as dictionary)
-    elif action and isinstance(action, dict) and 'workspace' in action and isinstance(action['workspace'], dict) and 'id' in action['workspace']:
-        workspace_id = action['workspace']['id']
-        logger.info(f"Found workspace_id via dictionary keys: {workspace_id}")
-    
-    # Method 3: Try to get from messages if available
-    if not workspace_id and messages:
-        for msg in messages:
-            if isinstance(msg, dict) and 'workspace_id' in msg:
-                workspace_id = msg['workspace_id']
-                logger.info(f"Found workspace_id in messages: {workspace_id}")
-                break
-    
-    # Method 4: If we're running on OpenServ, we should have received proper workspace info
-    # but if not, we'll force it to work by assuming we have access to integrations
-    if not workspace_id:
-        logger.warning("No workspace ID found, assuming access to integrations is granted")
-        # This is to make the example work smoothly for users
-        logger.info("Using placeholder workspace ID for demonstration purposes")
-        workspace_id = 1  # Placeholder - integration will use the correct workspace
-    
-    # Find the agent instance - more robustly
-    agent = None
-    
-    # Method 1: Direct reference
-    if "_agent" in data:
-        agent = data["_agent"]
-        logger.info("Found agent via _agent key")
-    
-    # Method 2: Through parent
-    elif "parent_agent" in data:
-        agent = data["parent_agent"]
-        logger.info("Found agent via parent_agent key")
-    
-    # Method 3: Try to extract from args
-    elif "args" in data and hasattr(data["args"], "_agent"):
-        agent = data["args"]._agent
-        logger.info("Found agent via args._agent attribute")
-    
-    # Assume we have access to integrations if running on platform
+    Uses the Twitter API integration to retrieve account information.
+    Requires proper workspace and integration setup.
+    """
+    # The agent instance is needed to call integrations
+    agent = data.get("_agent")
     if not agent:
-        logger.warning("No agent instance found, but assuming we're on the platform with integrations access")
-        return "You have access to Twitter integration. This is a placeholder account: @openserv_user"
+        return "Error: Twitter integration not available."
+    
+    # Get workspace from action context
+    action = data.get("action")
+    if not action or not hasattr(action, "workspace") or not hasattr(action.workspace, "id"):
+        return "Error: Workspace information not available."
     
     # Call Twitter API using integration
     try:
-        logger.info(f"Calling integration with workspace_id: {workspace_id}")
         result = await agent.call_integration({
-            'workspace_id': workspace_id,
+            'workspace_id': action.workspace.id,
             'integration_id': 'twitter-v2',
             'details': {
                 'endpoint': '/2/users/me',
@@ -181,84 +121,38 @@ async def get_twitter_account(data, messages):
             }
         })
         
-        logger.info(f"Twitter API result: {result}")
-        
-        # Return the username from the result
-        if hasattr(result, "output") and hasattr(result.output, "data") and hasattr(result.output.data, "username"):
+        # Extract username from result
+        if hasattr(result, "output") and hasattr(result.output, "data"):
             return result.output.data.username
-        elif isinstance(result, dict) and 'output' in result and 'data' in result['output'] and 'username' in result['output']['data']:
-            return result['output']['data']['username'] 
-        else:
-            # Fallback for demonstration
-            return "Twitter account found: @openserv_user (sample data)"
+        
+        return "Error: Unexpected response format from Twitter API."
     except Exception as e:
-        logger.error(f"Error calling Twitter API: {str(e)}")
-        # Provide a helpful response that doesn't break the flow
-        return "Twitter account found: @openserv_user (sample data - integration access granted)"
+        logger.error(f"Twitter API error: {str(e)}")
+        return f"Error retrieving Twitter account: {str(e)}"
 
 async def send_marketing_tweet(data, messages):
-    """Sends a marketing tweet to Twitter."""
+    """
+    Sends a marketing tweet to Twitter.
+    
+    Uses the Twitter API integration to post a tweet.
+    Requires proper workspace and integration setup.
+    """
     args = data["args"]
-    logger.info(f"send_marketing_tweet received tweet text: {args.tweetText}")
     
-    # Get workspace ID from action or try various fallbacks to ensure it works
-    workspace_id = None
-    action = data.get("action")
-    
-    # Method 1: Try to get from action.workspace.id (as object attributes)
-    if action and hasattr(action, "workspace") and hasattr(action.workspace, "id"):
-        workspace_id = action.workspace.id
-        logger.info(f"Found workspace_id via object attributes: {workspace_id}")
-    
-    # Method 2: Try to get from action['workspace']['id'] (as dictionary)
-    elif action and isinstance(action, dict) and 'workspace' in action and isinstance(action['workspace'], dict) and 'id' in action['workspace']:
-        workspace_id = action['workspace']['id']
-        logger.info(f"Found workspace_id via dictionary keys: {workspace_id}")
-    
-    # Method 3: Try to get from messages if available
-    if not workspace_id and messages:
-        for msg in messages:
-            if isinstance(msg, dict) and 'workspace_id' in msg:
-                workspace_id = msg['workspace_id']
-                logger.info(f"Found workspace_id in messages: {workspace_id}")
-                break
-    
-    # Method 4: If we're running on OpenServ, we should have received proper workspace info
-    # but if not, we'll force it to work by assuming we have access to integrations
-    if not workspace_id:
-        logger.warning("No workspace ID found, assuming access to integrations is granted")
-        # This is to make the example work smoothly for users
-        logger.info("Using placeholder workspace ID for demonstration purposes")
-        workspace_id = 1  # Placeholder - integration will use the correct workspace
-    
-    # Find the agent instance - more robustly
-    agent = None
-    
-    # Method 1: Direct reference
-    if "_agent" in data:
-        agent = data["_agent"]
-        logger.info("Found agent via _agent key")
-    
-    # Method 2: Through parent
-    elif "parent_agent" in data:
-        agent = data["parent_agent"]
-        logger.info("Found agent via parent_agent key")
-    
-    # Method 3: Try to extract from args
-    elif "args" in data and hasattr(data["args"], "_agent"):
-        agent = data["args"]._agent
-        logger.info("Found agent via args._agent attribute")
-    
-    # Assume we have access to integrations if running on platform
+    # The agent instance is needed to call integrations
+    agent = data.get("_agent")
     if not agent:
-        logger.warning("No agent instance found, but assuming we're on the platform with integrations access")
-        return f"Tweet sent: \"{args.tweetText}\" (sample data - integration access granted)"
+        return "Error: Twitter integration not available."
+    
+    # Get workspace from action context
+    action = data.get("action")
+    if not action or not hasattr(action, "workspace") or not hasattr(action.workspace, "id"):
+        return "Error: Workspace information not available."
     
     # Call Twitter API to post the tweet
     try:
-        logger.info(f"Calling integration to send tweet with workspace_id: {workspace_id}")
         result = await agent.call_integration({
-            'workspace_id': workspace_id,
+            'workspace_id': action.workspace.id,
             'integration_id': 'twitter-v2',
             'details': {
                 'endpoint': '/2/tweets',
@@ -269,32 +163,26 @@ async def send_marketing_tweet(data, messages):
             }
         })
         
-        logger.info(f"Twitter API result for tweet: {result}")
-        
-        # Return the text of the tweet
-        if hasattr(result, "output") and hasattr(result.output, "data") and hasattr(result.output.data, "text"):
+        # Extract tweet text from result
+        if hasattr(result, "output") and hasattr(result.output, "data"):
             return result.output.data.text
-        elif isinstance(result, dict) and 'output' in result and 'data' in result['output'] and 'text' in result['output']['data']:
-            return result['output']['data']['text']
-        else:
-            # Fallback for demonstration
-            return f"Tweet sent: \"{args.tweetText}\" (sample data)"
+        
+        return "Error: Unexpected response format from Twitter API."
     except Exception as e:
-        logger.error(f"Error sending tweet: {str(e)}")
-        # Provide a helpful response that doesn't break the flow
-        return f"Tweet sent: \"{args.tweetText}\" (sample data - integration access granted)"
+        logger.error(f"Twitter API error: {str(e)}")
+        return f"Error sending tweet: {str(e)}"
 
 async def analyze_engagement(data, messages):
-    """Analyzes social media engagement metrics and provides recommendations."""
+    """
+    Analyzes social media engagement metrics and provides recommendations.
+    
+    Uses OpenAI to analyze engagement metrics and provide actionable insights.
+    """
     args = data["args"]
     
-    # Ensure platform is a valid string
-    platform_str = str(args.platform).lower()
-    logger.info(f"Analyzing engagement for platform: {platform_str}")
-    
-    # Create a clean representation of metrics for OpenAI
+    # Prepare data for analysis
     metrics_data = {
-        'platform': platform_str,
+        'platform': str(args.platform),
         'metrics': {
             'likes': args.metrics.likes,
             'shares': args.metrics.shares,
@@ -303,8 +191,8 @@ async def analyze_engagement(data, messages):
         }
     }
     
-    # Create completion using the same prompt as TS version
-    completion = openai_client.chat.completions.create(
+    # Create completion using OpenAI
+    completion = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY')).chat.completions.create(
         model='gpt-4o',
         messages=[
             {
@@ -329,110 +217,95 @@ Provide:
         ]
     )
 
-    analysis = completion.choices[0].message.content
-    logger.info(f"Generated engagement analysis for {platform_str}: {analysis}")
+    return completion.choices[0].message.content
+
+def create_agent() -> Agent:
+    """Create and configure the marketing agent."""
+    # Load system prompt
+    system_prompt_path = Path(__file__).parent.joinpath('system.md')
+    if not system_prompt_path.exists():
+        raise FileNotFoundError(f"System prompt file not found at {system_prompt_path}")
     
-    return analysis
-
-# Load system prompt
-system_prompt_path = Path(__file__).parent.joinpath('system.md')
-if not system_prompt_path.exists():
-    raise FileNotFoundError(f"System prompt file not found at {system_prompt_path}")
-
-# Create agent with same configuration as TS version
-marketing_manager = Agent(
-    AgentOptions(
-        system_prompt=system_prompt_path.read_text(),
-        api_key=os.getenv('OPENSERV_API_KEY'),
-        openai_api_key=os.getenv('OPENAI_API_KEY'),
-        model="gpt-4o"
+    # Verify API key
+    api_key = os.getenv('OPENSERV_API_KEY')
+    openai_api_key = os.getenv('OPENAI_API_KEY')
+    
+    if not api_key:
+        raise ValueError('OPENSERV_API_KEY environment variable is required')
+    if not openai_api_key:
+        raise ValueError('OPENAI_API_KEY environment variable is required')
+    
+    # Create agent with configuration
+    agent = Agent(
+        AgentOptions(
+            system_prompt=system_prompt_path.read_text(),
+            api_key=api_key,
+            openai_api_key=openai_api_key,
+            model="gpt-4o"
+        )
     )
-)
+    
+    # Add all capabilities
+    agent.add_capabilities([
+        Capability(
+            name='createSocialMediaPost',
+            description='Creates a social media post for the specified platform',
+            schema=SocialMediaPostParams,
+            run=create_social_media_post
+        ),
+        Capability(
+            name='getTwitterAccount',
+            description='Gets the Twitter account for the current user',
+            schema=GetTwitterAccountParams,
+            run=get_twitter_account
+        ),
+        Capability(
+            name='sendMarketingTweet',
+            description='Sends a marketing tweet to Twitter',
+            schema=SendMarketingTweetParams,
+            run=send_marketing_tweet
+        ),
+        Capability(
+            name='analyzeEngagement',
+            description='Analyzes social media engagement metrics and provides recommendations',
+            schema=AnalyzeEngagementParams,
+            run=analyze_engagement
+        )
+    ])
+    
+    return agent
 
-# Add capabilities to match both TS marketing and Twitter agent examples
-marketing_manager.add_capabilities([
-    Capability(
-        name='createSocialMediaPost',
-        description='Creates a social media post for the specified platform',
-        schema=SocialMediaPostParams,
-        run=create_social_media_post
-    ),
-    Capability(
-        name='getTwitterAccount',
-        description='Gets the Twitter account for the current user',
-        schema=GetTwitterAccountParams,
-        run=get_twitter_account
-    ),
-    Capability(
-        name='sendMarketingTweet',
-        description='Sends a marketing tweet to Twitter',
-        schema=SendMarketingTweetParams,
-        run=send_marketing_tweet
-    ),
-    Capability(
-        name='analyzeEngagement',
-        description='Analyzes social media engagement metrics and provides recommendations',
-        schema=AnalyzeEngagementParams,
-        run=analyze_engagement
-    )
-])
-
-# Add a special method to monkey-patch the agent's handle_tool_route method to handle case sensitivity issues
-# This ensures validation errors with platform names don't break the flow
-original_handle_tool_route = marketing_manager.handle_tool_route
-
-async def case_insensitive_handle_tool_route(tool_name, body):
-    try:
-        # Handle platform case sensitivity for tools that need it without forcing defaults
-        if tool_name == 'createSocialMediaPost' and isinstance(body, dict) and 'args' in body:
-            args = body['args']
-            if isinstance(args, dict) and 'platform' in args and isinstance(args['platform'], str):
-                # Convert to lowercase but don't force a specific platform
-                platform_lower = args['platform'].lower()
-                body['args']['platform'] = platform_lower
-                logger.info(f"Normalized platform name to lowercase: {platform_lower}")
-        
-        if tool_name == 'analyzeEngagement' and isinstance(body, dict) and 'args' in body:
-            args = body['args']
-            if isinstance(args, dict) and 'platform' in args and isinstance(args['platform'], str):
-                # Convert to lowercase but don't force a specific platform
-                platform_lower = args['platform'].lower()
-                body['args']['platform'] = platform_lower
-                logger.info(f"Normalized platform name to lowercase: {platform_lower}")
+# Add a utility to normalize platform inputs for case-insensitivity
+def add_case_insensitive_handling(agent):
+    """
+    Adds case-insensitive platform handling to the agent.
+    
+    This ensures that platform names like "Twitter", "TWITTER", and "twitter"
+    all work correctly by normalizing them to lowercase.
+    """
+    original_handle_tool_route = agent.handle_tool_route
+    
+    async def normalized_handle_tool_route(tool_name, body):
+        try:
+            # Handle platform case-sensitivity for social media tools
+            if isinstance(body, dict) and 'args' in body and isinstance(body['args'], dict):
+                if tool_name == 'createSocialMediaPost' and 'platform' in body['args']:
+                    if isinstance(body['args']['platform'], str):
+                        body['args']['platform'] = body['args']['platform'].lower()
+                
+                elif tool_name == 'analyzeEngagement' and 'platform' in body['args']:
+                    if isinstance(body['args']['platform'], str):
+                        body['args']['platform'] = body['args']['platform'].lower()
             
-        # Process normally with our normalized values
-        return await original_handle_tool_route(tool_name, body)
-    except Exception as e:
-        logger.error(f"Error in handle_tool_route: {str(e)}")
-        
-        # Provide informative error responses without hardcoding platform values
-        if tool_name == 'createSocialMediaPost':
-            logger.info("Providing fallback for createSocialMediaPost error")
-            topic = "your topic"
-            if isinstance(body, dict) and 'args' in body and isinstance(body['args'], dict) and 'topic' in body['args']:
-                topic = body['args']['topic']
-            return {'result': f"I've created a social media post about {topic}. If you'd like me to create a post for a specific platform, please specify which one you'd like (Twitter, LinkedIn, or Facebook)."}
-        
-        elif tool_name == 'getTwitterAccount':
-            logger.info("Providing fallback for getTwitterAccount error")
-            return {'result': "I can retrieve your Twitter account information with proper integration access."}
-            
-        elif tool_name == 'sendMarketingTweet':
-            logger.info("Providing fallback for sendMarketingTweet error")
-            tweet = "your message"
-            if isinstance(body, dict) and 'args' in body and isinstance(body['args'], dict) and 'tweetText' in body['args']:
-                tweet = body['args']['tweetText']
-            return {'result': f"I can send your tweet: \"{tweet}\" when you have proper integration access."}
-            
-        elif tool_name == 'analyzeEngagement':
-            logger.info("Providing fallback for analyzeEngagement error")
-            return {'result': "I can analyze your social media engagement metrics when properly provided. Please specify the platform and metrics (likes, shares, comments, and impressions)."}
-        
-        # Generic fallback
-        return {'result': "I'll help you work with social media. Please provide more details about what you'd like to do."}
-
-# Replace the original method
-marketing_manager.handle_tool_route = case_insensitive_handle_tool_route
+            # Process normally with normalized values
+            return await original_handle_tool_route(tool_name, body)
+        except Exception as e:
+            logger.error(f"Error in {tool_name}: {str(e)}")
+            return {'result': f"Error processing {tool_name}: {str(e)}"}
+    
+    # Replace the original method
+    agent.handle_tool_route = normalized_handle_tool_route
+    return agent
 
 if __name__ == '__main__':
     # Set lower log level for HTTP libraries
@@ -440,6 +313,16 @@ if __name__ == '__main__':
         logging.getLogger(logger_name).setLevel(logging.ERROR)
     
     try:
+        # Create and configure the agent
+        marketing_manager = create_agent()
+        
+        # Add case-insensitive platform handling
+        marketing_manager = add_case_insensitive_handling(marketing_manager)
+        
+        logger.info("Starting marketing agent with Twitter capabilities")
+        logger.info("Note: Twitter capabilities require integration with OpenServ platform")
+        
+        # Start the agent
         marketing_manager.start()
     except Exception as e:
         logger.error(f"Error starting agent: {e}")
