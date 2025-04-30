@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-# Configure logging for better visibility
+# Configure logging, a debugger for Python
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
