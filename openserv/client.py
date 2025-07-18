@@ -29,12 +29,8 @@ class BaseClient:
     """Base class for API clients."""
     def __init__(self, config: APIConfig):
         self.config = config
-        # Create client without base_url, will be set by subclasses
+        # Create client without default headers to avoid conflicts
         self.client = httpx.AsyncClient(
-            headers={
-                'Content-Type': 'application/json',
-                'x-openserv-key': config.api_key
-            },
             timeout=30.0  # Set a reasonable default timeout
         )
     
@@ -61,27 +57,32 @@ class BaseClient:
         json_data: Optional[Dict[str, Any]] = None,
         params: Optional[Dict[str, str]] = None,
         files: Optional[Dict[str, Any]] = None,
+        data: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Make an HTTP request and handle common error cases."""
         logger = logging.getLogger(__name__)
         try:
             # Pre-serialize JSON with our custom encoder
             content = None
-            headers = {}
+            # Always include API key in headers
+            base_headers = {'x-openserv-key': self.config.api_key}
             
             # Handle file uploads with multipart/form-data
             if files is not None:
                 logger.debug(f"Sending {method} request to {path} with files")
-                # For multipart form data, let httpx handle the content
+                # For multipart form data, only include API key (no Content-Type)
+                headers = base_headers.copy()
                 response = await self.client.request(
                     method,
                     path,
                     params=params,
                     files=files,
-                    data=json_data,  # For file uploads, json_data is sent as form fields
+                    data=data or json_data,  # Use data parameter for form fields, fallback to json_data
+                    headers=headers,
                 )
             else:
                 # Normal JSON request
+                headers = base_headers.copy()
                 if json_data is not None:
                     content = json.dumps(json_data, cls=DateTimeEncoder).encode('utf-8')
                     headers['Content-Type'] = 'application/json'
@@ -209,10 +210,19 @@ class OpenServClient(BaseClient):
     ) -> Dict[str, Any]:
         """Upload a file to a workspace."""
         # Create files dictionary for multipart upload
-        files = {'file': ('file', file_content)}
+        # Use filename from path for the file tuple
+        import os
+        filename = os.path.basename(path) if path else 'file'
+        files = {'file': (filename, file_content, 'text/plain')}
         
         # Create form data (not JSON)
         data = {'path': path}
+        
+        # Log upload details for debugging
+        logger.info(f"Uploading file: workspace_id={workspace_id}, path={path}, filename={filename}")
+        logger.info(f"File content type: {type(file_content)}, size: {len(file_content) if hasattr(file_content, '__len__') else 'unknown'}")
+        logger.info(f"Form data: {data}")
+        logger.info(f"Files: {[(k, v[0], type(v[1]).__name__, len(v[1]) if hasattr(v[1], '__len__') else 'unknown') for k, v in files.items()]}")
         
         # Add optional parameters if they are provided
         if task_ids is not None:
@@ -227,8 +237,8 @@ class OpenServClient(BaseClient):
         # Use form data instead of JSON for file uploads
         return await self._request(
             'POST',
-            f'/workspaces/{workspace_id}/files',
-            json_data=data,  # This will be sent as form fields with files
+            f'/workspaces/{workspace_id}/file',
+            data=data,  # This will be sent as form fields with files
             files=files
         )
 
